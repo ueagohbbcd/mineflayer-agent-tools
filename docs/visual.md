@@ -6,6 +6,10 @@ API is auxiliary and remains compatible. The consumer calls the CLI/JS exporter,
 calls an optional renderer, and displays the resulting PNG in its own UI.
 These tools run locally on cached data; `summary()` remains a text-only query.
 
+For caller-driven JavaScript views of an already connected bot or local mirror,
+see [live CPU views](live-visual.md). They reuse this package without adding a
+background service; the offline cache export/render workflow below is unchanged.
+
 ## Bare images and separate explanations
 
 The default PNG contains the scene itself. The surface view has textures and

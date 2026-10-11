@@ -94,3 +94,10 @@ node benchmark/terrain.js
 Verification uses synthetic worlds/assets; live-server behavior remains untested. Blender
 rendering is a separate optional smoke test described in the visual guide. Core
 Node installation has no Python, Blender, browser or GPU requirement.
+
+### On-demand perception helpers
+
+Use [live CPU views](docs/live-visual.md) for bounded surface/local snapshots,
+bare PNGs, real top-face textures and explicit unknown/history metadata from an
+already connected bot. They are exposed through `visual.live` or `live.mjs`;
+no background observer or strategy loop is installed.
