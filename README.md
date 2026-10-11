@@ -101,3 +101,7 @@ Use [live CPU views](docs/live-visual.md) for bounded surface/local snapshots,
 bare PNGs, real top-face textures and explicit unknown/history metadata from an
 already connected bot. They are exposed through `visual.live` or `live.mjs`;
 no background observer or strategy loop is installed.
+
+[Perception queries](docs/perception-queries.md) include an on-demand tree-candidate
+query: connected log coordinates, nearby leaf evidence and observation boundaries.
+Import `queryTreeCandidate` from `queries.mjs`; control code chooses which blocks to harvest.

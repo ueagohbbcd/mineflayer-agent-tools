@@ -294,4 +294,4 @@ function createWorldMemory (bot, options = {}) {
     },
     dispose }
 }
-module.exports = { createWorldMemory, coverageRectangles, visual: require('./lib/visual') }
+module.exports = { createWorldMemory, coverageRectangles, queries: require('./queries'), visual: require('./lib/visual') }

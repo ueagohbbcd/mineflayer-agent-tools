@@ -35,7 +35,9 @@
     "LICENSE",
     "examples/*.js",
     "live.js",
-    "live.mjs"
+    "live.mjs",
+    "queries.js",
+    "queries.mjs"
   ],
   "devDependencies": {
     "mineflayer": "4.39.0"

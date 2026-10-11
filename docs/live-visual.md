@@ -20,6 +20,10 @@ Ordinary JavaScript still owns goals, movement, retries and actions.
   model-aware local 3D, or an underground air cast: keep using the existing
   [visual tools](visual.md) and [local 3D](local-3d.md).
 
+For a candidate tree trunk before chopping, use the optional
+[perception queries](perception-queries.md). Its returned coordinates can feed the
+same caller-controlled JavaScript that requests a local view.
+
 ## Smallest live-view call
 
 ```js
@@ -77,8 +81,8 @@ mirror may have names without native state IDs, or gaps above a lower known
 block. Neither schema is relabelled as the other. Existing `visual.surface`,
 `exportSurface`, native cache identity checks and offline renderers are unchanged.
 
-`surfaceSnapshotFromBot` caps columns at 262,144 and sample work at 134,217,728;
-`maxColumns` and `maxSamples` can lower these limits. A full 128×128×384 loaded
+`surfaceSnapshotFromBot` defaults to budgets of 262,144 columns and 134,217,728
+samples; callers can adjust `maxColumns` and `maxSamples` to suit their work. A full 128×128×384 loaded
 region needs 16,384 compact entries rather than millions of block objects.
 `snapshotFromBot(bot, { bounds, maxVoxels })` captures explicit known cells,
 including air; default acquisition cap is 1,000,000 voxels and the renderer's

@@ -496,3 +496,16 @@ test("pixel-center sampling preserves all four pixels across face and variant ro
       );
     }
 });
+
+test("callers can raise surface budgets without a hidden second ceiling", () => {
+  const box = { min: { x: 0, y: 0, z: 0 }, max: { x: 262144, y: 0, z: 0 } };
+  const bot = {
+    hasColumnMirror: true,
+    columns: new Map(),
+    blockAt: () => assert.fail("unloaded mirror read"),
+  };
+  const s = live.surfaceSnapshotFromBot(bot, box, { maxColumns: 262145 });
+  const r = live.renderSurfaceMinimap(s, { width: 1, height: 1 });
+  assert.equal(r.metadata.columns.total, 262145);
+  assert.equal(r.metadata.knownVoxels, 0);
+});
