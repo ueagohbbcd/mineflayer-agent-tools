@@ -121,7 +121,7 @@ function createWorldMemory (bot, options = {}) {
   listen('blockUpdate', (oldBlock, block) => {
     if (!block?.position) return
     const p = block.position, r = map(dimension()).get(key(Math.floor(p.x / 16), Math.floor(p.z / 16)))
-    if (r) { r.generation = (r.generation || 0) + 1; r.analysis = null; r.dirty = true; r.observedAt = now(); revision++; schedule() }
+    if (r?.loaded) { r.generation = (r.generation || 0) + 1; if (oldBlock?.stateId !== block.stateId) r.analysis = null; r.dirty = true; r.observedAt = now(); revision++; schedule() }
   })
   listen('blockEntityData', block => {
     const p = block?.position, r = p && map(dimension()).get(key(Math.floor(p.x / 16), Math.floor(p.z / 16)))
