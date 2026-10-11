@@ -105,3 +105,36 @@ no background observer or strategy loop is installed.
 [Perception queries](docs/perception-queries.md) include an on-demand tree-candidate
 query: connected log coordinates, nearby leaf evidence and observation boundaries.
 Import `queryTreeCandidate` from `queries.mjs`; control code chooses which blocks to harvest.
+
+### Full-column readers without automatic exposure analysis
+
+For a read service or archival observer, use `analysis: 'lazy'`:
+
+```js
+const memory = createWorldMemory(bot, {
+  analysis: 'lazy',
+  directory: './memory',
+  worldId: 'world/reset/player' // keep independent worlds/resets/players isolated
+})
+await memory.ready // restored files and current received columns, no voxel scan
+const info = memory.chunkInfo({ dimension: 'overworld', x: -1, z: 0 })
+const block = memory.block({ dimension: 'overworld', x: -1, y: -40, z: 3 })
+const columns = memory.chunks({ dimension: 'overworld' })
+await memory.flush() // persist native columns without exposure analysis
+```
+
+`chunkInfo` and `chunks` return detached metadata: chunk coordinates, dimension,
+`loaded`, `observedAt`, version, minimum Y and height. `revision` is the live
+memory revision; `summary().revision` remains the separately computed exposure
+revision. A missing column is unknown; known air is a real block. Loaded records
+retain native column updates; unload keeps the last column, and the next load
+replaces the complete record. Metadata `observedAt` records the latest captured
+chunk/block event, not the time every unchanged cell was individually received.
+
+Lazy mode still saves dirty native columns automatically. It skips automatic
+exposure classification, including on disposal. `refresh()` and `find()` remain
+explicit, potentially expensive exposure-analysis requests. `find()` searches
+exposed blocks only; `block()` and `chunk()` include all received blocks, even
+sealed blocks. `ready`, exact reads and metadata reads do not request analysis.
+`chunk()` returns the underlying native object for existing compatibility;
+services should serialize it or wrap getters rather than expose mutation.
