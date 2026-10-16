@@ -14,10 +14,12 @@
   "dependencies": {
     "prismarine-chunk": "^1.41.0",
     "prismarine-registry": "^1.1.0",
-    "prismarine-block": "^1.23.0"
+    "prismarine-block": "^1.23.0",
+    "vec3": "^0.2.0"
   },
   "peerDependencies": {
-    "mineflayer": ">=4.39.0 <5"
+    "mineflayer": ">=4.39.0 <5",
+    "prismarine-viewer": "^1.33.0"
   },
   "bin": {
     "world-memory": "bin/world-memory.js"
@@ -31,9 +33,18 @@
     "docs/*.md",
     "README.md",
     "LICENSE",
-    "examples/*.js"
+    "examples/*.js",
+    "live.js",
+    "live.mjs",
+    "queries.js",
+    "queries.mjs"
   ],
   "devDependencies": {
     "mineflayer": "4.39.0"
+  },
+  "peerDependenciesMeta": {
+    "prismarine-viewer": {
+      "optional": true
+    }
   }
 }

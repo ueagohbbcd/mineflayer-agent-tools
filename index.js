@@ -88,15 +88,17 @@ async function classify (column, registry) {
 
 function createWorldMemory (bot, options = {}) {
   if (options.directory && !options.worldId) throw new Error('worldId is required when persistence is enabled')
+  if (options.analysis !== undefined && !['eager', 'lazy'].includes(options.analysis)) throw new Error('analysis must be eager or lazy')
+  const lazy = options.analysis === 'lazy'
   const dimensions = new Map(), listeners = [], now = options.now || Date.now
   const directory = options.directory && path.join(options.directory, Buffer.from(String(options.worldId)).toString('base64url'))
-  let revision = 0, computedRevision = -1, running, disposed = false, error = null, restoreError = null, loadedDimension, scheduled, closing
+  let revision = 0, computedRevision = -1, running, disposed = false, error = null, restoreError = null, loadedDimension, scheduled, closing, persisting
   let snapshot = { revision: 0, dimensions: {}, blockCounts: {}, pending: true }
   const dimension = () => String(bot.game?.dimension || 'overworld')
   const map = d => { if (!dimensions.has(d)) dimensions.set(d, new Map()); return dimensions.get(d) }
   function schedule () {
     if (disposed || scheduled) return
-    scheduled = setImmediate(() => { scheduled = null; if (!disposed) refresh().catch(() => {}) })
+    scheduled = setImmediate(() => { scheduled = null; if (!disposed) (lazy ? flush() : refresh()).catch(e => { error = e.message }) })
   }
   function capture (x, z, column, received = false) {
     if (!column) return
@@ -114,12 +116,16 @@ function createWorldMemory (bot, options = {}) {
     for (const c of bot.world?.getColumns?.() || []) capture(Number(c.chunkX), Number(c.chunkZ), c.column)
   }
   function listen (event, fn) { bot.on(event, fn); listeners.push([event, fn]) }
-  listen('chunkColumnLoad', p => { synchronize(); capture(Math.floor(p.x / 16), Math.floor(p.z / 16), bot.world?.getColumnAt(p), true) })
+  listen('chunkColumnLoad', p => { synchronize(); capture(Math.floor(p.x / 16), Math.floor(p.z / 16), bot.world?.getColumnAt?.(p) || bot.world?.getColumn?.(Math.floor(p.x / 16), Math.floor(p.z / 16)), true) })
   listen('chunkColumnUnload', p => { const r = map(dimension()).get(key(Math.floor(p.x / 16), Math.floor(p.z / 16))); if (r?.loaded) { r.loaded = false; revision++; schedule() } })
   listen('blockUpdate', (oldBlock, block) => {
-    if (!block?.position || oldBlock?.stateId === block.stateId) return
+    if (!block?.position) return
     const p = block.position, r = map(dimension()).get(key(Math.floor(p.x / 16), Math.floor(p.z / 16)))
-    if (r) { r.generation = (r.generation || 0) + 1; r.analysis = null; r.dirty = true; r.observedAt = now(); revision++; schedule() }
+    if (r?.loaded) { r.generation = (r.generation || 0) + 1; if (oldBlock?.stateId !== block.stateId) r.analysis = null; r.dirty = true; r.observedAt = now(); revision++; schedule() }
+  })
+  listen('blockEntityData', block => {
+    const p = block?.position, r = p && map(dimension()).get(key(Math.floor(p.x / 16), Math.floor(p.z / 16)))
+    if (r?.loaded) { r.generation = (r.generation || 0) + 1; r.dirty = true; r.observedAt = now(); revision++; schedule() }
   })
   listen('spawn', synchronize)
   listen('end', () => { dispose().catch(e => { error = e.message }) })
@@ -140,6 +146,12 @@ function createWorldMemory (bot, options = {}) {
     }
     synchronize(); schedule()
   })()
+  async function flush () {
+    await ready
+    if (persisting) { await persisting; return flush() }
+    persisting = persist()
+    try { await persisting } finally { persisting = null }
+  }
   async function persist () {
     if (!directory) return
     for (const [d, records] of dimensions) for (const r of records.values()) {
@@ -241,7 +253,7 @@ function createWorldMemory (bot, options = {}) {
         output[d] = { blockCounts: counts, coverage: coverageRectangles(coordinates), currentCoverage: coverageRectangles(current), chunks: records.size, loadedChunks: current.length, lastObservedAt: Math.max(0, ...[...records.values()].map(r => r.observedAt)), chunkSummaries }
       }
       snapshot = { revision: target, dimensions: output, blockCounts: total }; computedRevision = target
-      await persist()
+      await flush()
       error = null
       break
     }
@@ -279,19 +291,31 @@ function createWorldMemory (bot, options = {}) {
       let changed = false
       for (const records of dimensions.values()) for (const r of records.values()) if (r.loaded) { r.loaded = false; changed = true }
       if (changed) revision++
-      while (computedRevision !== revision) await refresh()
-      await persist()
+      if (!lazy) while (computedRevision !== revision) await refresh()
+      await flush()
     })()
     return closing
   }
-  return { summary, refresh, find, chunk: ({ x, z, dimension: d = dimension() }) => map(d).get(key(x, z))?.column || null,
+  function chunkInfo ({ x, z, dimension: d = dimension() }) {
+    const r = dimensions.get(d)?.get(key(x, z))
+    return r ? { x, z, dimension: d, loaded: r.loaded, observedAt: r.observedAt, version: bot.version, minY: r.column.minY ?? bot.game?.minY ?? 0, height: r.column.worldHeight ?? bot.game?.height ?? 256 } : null
+  }
+  function chunks ({ dimension: d } = {}) {
+    const output = []
+    for (const [dimension, records] of dimensions) {
+      if (d !== undefined && d !== dimension) continue
+      for (const r of records.values()) output.push(chunkInfo({ x: r.x, z: r.z, dimension }))
+    }
+    return output
+  }
+  return { ready, flush, chunkInfo, chunks, get revision () { return revision }, summary, refresh, find, chunk: ({ x, z, dimension: d = dimension() }) => map(d).get(key(x, z))?.column || null,
     block: ({ x, y, z, dimension: d = dimension() }) => {
       const column = map(d).get(key(Math.floor(x / 16), Math.floor(z / 16)))?.column
       if (!column) return null
-      if (y < (column.minY ?? -64) || y >= (column.minY ?? -64) + (column.worldHeight ?? 384)) return null
+      if (y < (column.minY ?? bot.game?.minY ?? 0) || y >= (column.minY ?? bot.game?.minY ?? 0) + (column.worldHeight ?? bot.game?.height ?? 256)) return null
       const block = column.getBlock({ x: ((x % 16) + 16) % 16, y, z: ((z % 16) + 16) % 16 })
       block.position = { x, y, z }; return block
     },
     dispose }
 }
-module.exports = { createWorldMemory, coverageRectangles, visual: require('./lib/visual') }
+module.exports = { createWorldMemory, coverageRectangles, queries: require('./queries'), visual: require('./lib/visual') }
