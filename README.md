@@ -1,4 +1,20 @@
-# mineflayer-world-memory
+# Mineflayer Agent Tools
+
+Reusable Mineflayer agent utilities: on-demand perception queries, optional
+historical chunk memory, visual inspection, and generic watchdogs.
+
+**Proposed repository name:** `mineflayer-agent-tools`. The install/import
+package remains `mineflayer-world-memory` until consumer migrations are ready.
+
+For ordinary block queries, the live Mineflayer world is authoritative.
+`readWorldBlock(bot, position, memory)` in `reader.js` / `reader.mjs`
+returns a live block first; only previously received *unloaded* chunks may
+supply historical (potentially stale) fallback. Pass `null` for memory to
+operate without any history collection.
+
+See [project scope](docs/project-scope.md).
+
+## Optional historical world memory
 
 Persistent native world memory for Mineflayer, tested with Minecraft Java 1.21.1.
 It remembers chunks the bot has received, including unloaded chunks and other
