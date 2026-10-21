@@ -318,4 +318,4 @@ function createWorldMemory (bot, options = {}) {
     },
     dispose }
 }
-module.exports = { createWorldMemory, coverageRectangles, queries: require('./queries'), visual: require('./lib/visual'), watchdog: require('./watchdog').watchdog }
+module.exports = { createWorldMemory, readWorldBlock: require('./reader').readWorldBlock, coverageRectangles, queries: require('./queries'), visual: require('./lib/visual'), watchdog: require('./watchdog').watchdog }

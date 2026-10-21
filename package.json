@@ -1,7 +1,7 @@
 {
   "name": "mineflayer-world-memory",
   "version": "0.1.0",
-  "description": "Persistent exposed-world exploration memory for Mineflayer",
+  "description": "Optional chunk history, perception queries, visuals, and watchdogs for Mineflayer agents",
   "main": "index.js",
   "license": "MIT",
   "engines": {
@@ -26,6 +26,8 @@
   },
   "files": [
     "index.js",
+    "reader.js",
+    "reader.mjs",
     "lib/*.js",
     "bin/*.js",
     "renderers/*.py",
