@@ -41,6 +41,7 @@
     "renderers/*.py",
     "renderers/requirements.txt",
     "docs/*.md",
+    "skills/**/*.md",
     "README.md",
     "LICENSE",
     "examples/*.js",
