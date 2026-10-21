@@ -23,6 +23,10 @@ operate without any history collection.
 
 See [project scope](docs/project-scope.md).
 
+To let an agent play Minecraft through Mineflayer, give it the
+[`mineflayer-agent` skill](skills/mineflayer-agent/SKILL.md): setup, how to write
+control programs, and guides for moving, looking, items and survival.
+
 ## Optional historical world memory
 
 Persistent native world memory for Mineflayer, tested with Minecraft Java 1.21.1.

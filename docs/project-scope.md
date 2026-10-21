@@ -30,9 +30,10 @@ later, separate breaking change.
 ## Division of work with Craft Arena
 
 - This repository ships libraries, small proven tools, prompts and guides. The
-  guides will be packed into one main skill for "drop into any agent and play
-  Minecraft", including short Mineflayer install/join notes; unit guides stay as
-  references inside it, not as separately installed skills.
+  guides are packed into one main skill,
+  [`skills/mineflayer-agent`](../skills/mineflayer-agent/SKILL.md), for "drop
+  into any agent and play Minecraft", including short Mineflayer install/join
+  notes; unit guides are references inside it, not separately installed skills.
 - Craft Arena depends on the libraries only, through a pinned commit tarball. It
   does not install this repository's skills: it copies the parts it needs and
   rewrites them as its own smaller skills for the match rules.
