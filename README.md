@@ -3,8 +3,17 @@
 Reusable Mineflayer agent utilities: on-demand perception queries, optional
 historical chunk memory, visual inspection, and generic watchdogs.
 
-**Proposed repository name:** `mineflayer-agent-tools`. The install/import
-package remains `mineflayer-world-memory` until consumer migrations are ready.
+Repository: `ueagohbbcd/mineflayer-agent-tools` (formerly
+`mineflayer-world-memory`; GitHub redirects the old address). The package and
+import name stays `mineflayer-world-memory` for compatibility, so existing
+`require` / `import` paths keep working. Install from a GitHub tarball pinned
+to a commit; there is no npm release:
+
+```json
+"dependencies": {
+  "mineflayer-world-memory": "https://codeload.github.com/ueagohbbcd/mineflayer-agent-tools/tar.gz/<commit>"
+}
+```
 
 For ordinary block queries, the live Mineflayer world is authoritative.
 `readWorldBlock(bot, position, memory)` in `reader.js` / `reader.mjs`

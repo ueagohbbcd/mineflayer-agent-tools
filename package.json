@@ -4,6 +4,14 @@
   "description": "Optional chunk history, perception queries, visuals, and watchdogs for Mineflayer agents",
   "main": "index.js",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ueagohbbcd/mineflayer-agent-tools.git"
+  },
+  "homepage": "https://github.com/ueagohbbcd/mineflayer-agent-tools#readme",
+  "bugs": {
+    "url": "https://github.com/ueagohbbcd/mineflayer-agent-tools/issues"
+  },
   "engines": {
     "node": ">=18"
   },
