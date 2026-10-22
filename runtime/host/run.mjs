@@ -2,11 +2,12 @@
 /**
  * Run a module inside a character's own process, on the native bot:
  *
- *   node $ARENA_TOOLKIT_ROOT/packages/bot-host/run.mjs task.mjs [args...]
+ *   node runtime/host/run.mjs [--bot NAME] task.mjs [args...]
  *
- * Output of the module appears here; the exit code is 0 when it finished, 1
- * when it threw, 130 when it was cancelled. SIGTERM or SIGINT (arena-task
- * cancel) aborts the module; a stubborn module causes its whole host to restart.
+ * The supervisor runs it for `mf run`. Output of the module appears here; the
+ * exit code is 0 when it finished, 1 when it threw, 130 when it was cancelled.
+ * SIGTERM or SIGINT (`mf cancel`) aborts the module; a stubborn module causes
+ * its whole host to restart.
  */
 import { readFileSync } from "node:fs";
 import net from "node:net";
@@ -20,7 +21,7 @@ export function runSocket(bot, env = process.env) {
   if (!bot) {
     if (!env.ARENA_RUN_SOCKET)
       throw new Error(
-        "No run socket: this container does not run its own bot (ARENA_RUN_SOCKET is unset)",
+        "No run socket (ARENA_RUN_SOCKET is unset): start the characters with `mf start`",
       );
     return env.ARENA_RUN_SOCKET;
   }
@@ -28,7 +29,7 @@ export function runSocket(bot, env = process.env) {
   const entry = bots.find((b) => b.name === bot);
   if (!entry)
     throw new Error(
-      `${bot} is not one of this participant's characters: ${bots.map((b) => b.name).join(", ")}`,
+      `${bot} is not one of the characters: ${bots.map((b) => b.name).join(", ")}`,
     );
   return entry.runSocket;
 }

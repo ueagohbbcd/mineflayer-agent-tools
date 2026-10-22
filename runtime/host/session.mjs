@@ -1,7 +1,7 @@
 /**
  * Normalized read-only session data from the login gate for a match, or an
- * open local session. One builder keeps the shape identical for the Pi
- * extension, participant modules and outside readers.
+ * open local session. One builder keeps the shape identical for the host,
+ * modules and outside readers.
  */
 export function sessionObject({
   kind = "match",

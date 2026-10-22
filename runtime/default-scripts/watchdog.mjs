@@ -5,7 +5,7 @@
 // progress for minutes, walking in circles, walking into a wall, digging the
 // same block again and again, dying repeatedly in one place (urgent) and
 // repeating the same chat message. Each finding is reported once until the
-// situation changes. Stop it with arena-task cancel <taskId>, or copy it into
+// situation changes. Stop it with mf cancel <taskId>, or copy it into
 // your working directory and change the thresholds passed to createTrendWatch.
 import { InboxClient } from "../inbox/index.mjs";
 import { createTrendWatch } from "../observation/trend-watch.mjs";
@@ -40,9 +40,8 @@ export function startTrendWatchdog({
       watch.sample({
         t: now(),
         position: entity?.position,
-        moving: Boolean(
-          bot.entity?.velocity && bot.entity.velocity.norm() > 0.02,
-        ),
+        // A held movement key: pressed against a wall, velocity is zero.
+        moving: MOVES.some((key) => bot.controlState?.[key]),
         collided: Boolean(entity?.isCollidedHorizontally),
         inventory: inventoryKey(bot),
       }),

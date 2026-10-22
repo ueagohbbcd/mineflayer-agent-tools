@@ -10,7 +10,7 @@ never has to keep track of time.
 ## Quick start
 
 ```sh
-export MF_USERNAME=Steve ARENA_MINECRAFT_HOST=localhost   # ARENA_MINECRAFT_PORT, MC_VERSION optional
+export MF_USERNAME=Steve MF_HOST=localhost   # MF_PORT (25565) and MC_VERSION (1.21.1) optional
 npx mf start                       # supervisor + the character, in the background
 cat > look.mjs <<'EOF'
 export default async function (bot, { log }) {
@@ -20,8 +20,11 @@ EOF
 npx mf run look.mjs
 ```
 
-State lives in `./.mf` (or `MF_STATE_DIR`): sockets, `supervisor.log`, and
-one directory per program with `stdout.log`, `stderr.log` and `status.json`.
+Node 22 or newer. State lives in `./.mf` (or `MF_STATE_DIR`), so run `mf`
+from the directory where you started it: sockets, `supervisor.log`, and
+`tasks/<taskId>/` with `stdout.log`, `stderr.log` and `status.json` for each
+program (the newest 100 are kept across restarts; idle and snapshots leave
+none).
 
 ## Commands
 
@@ -32,7 +35,7 @@ one directory per program with `stdout.log`, `stderr.log` and `status.json`.
 | `mf wait [--wait S] [--stall S] TASK_ID` | Keep waiting on a program that is still running |
 | `mf cancel TASK_ID` | Stop a program |
 | `mf events` | Only the reports since the last result |
-| `mf status` | Characters and running programs (JSON) |
+| `mf status` | Characters, running programs and what programs set with `setStatus` (JSON) |
 | `mf snapshot [--full-entities] [--full-local] [--full-items]` | One full state sample (JSON) |
 
 ## A step
@@ -42,8 +45,8 @@ one directory per program with `stdout.log`, `stderr.log` and `status.json`.
 | Result | When |
 | --- | --- |
 | `completed` | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr). |
-| `running` | The module is still running: `--wait` seconds passed (default 30; `0` returns at once), it made no progress for `--stall` seconds (default 60: nothing printed, the character did not move and its inventory did not change), or an urgent report needs your attention (low health, a large hit, a chat mention, `requestJudgment`). Use `mf wait TASK_ID` to keep waiting, or run something else. |
-| `interrupted` | The module was stopped because its plan no longer holds: the character died or disconnected, its process was blocked by a synchronous loop, or a new program replaced it. |
+| `running` | The module is still running: `--wait` seconds passed (default 30; `0` returns at once), it made no progress for `--stall` seconds (default 20, used only when shorter than `--wait`: nothing printed and the character's position, health, food and inventory did not change), or an urgent report needs your attention (low health, a large hit, a chat mention, `requestJudgment`). Use `mf wait TASK_ID` to keep waiting, or run something else. |
+| `interrupted` | The module was stopped because its plan no longer holds: the character died or disconnected, its process was blocked by a synchronous loop, a new program replaced it, or you ran `mf cancel`. |
 | `not_started` | The character died, disconnected or its process crashed since your last result. The module was not run; read the reports and decide again. |
 
 `--wait` is your estimate of how long the program needs; output printed so far
@@ -81,9 +84,13 @@ export default async function (bot, { signal, args, log }) {
 }
 ```
 
-Listeners and timers a module adds are removed when it ends. When a
-controlling module is cancelled or throws, the character releases its keys and
-Pathfinder/PvP stop.
+Listeners a module adds on `bot` itself and timers it starts are removed when
+it ends; listeners on other objects (`bot.inventory`, `bot._client`, a
+plugin) are yours to remove. When a controlling module is cancelled or throws,
+the character releases its keys and Pathfinder/PvP stop. Relative paths inside
+a module resolve against the character's process, not your shell: build paths
+from `import.meta.url` or pass absolute ones. Each run loads the module file
+fresh, but files it imports are cached until the character restarts.
 
 Programs import the toolkit through `MF_TOOLKIT_ROOT` (set for every program),
 for example the watchdog that reports into the same queue:
@@ -100,7 +107,9 @@ Programs report with `InboxClient` (`runtime/inbox/index.mjs`): `post(data)`,
 
 Started with the supervisor, restarted with the character: `observer` (state
 and change reports; tune with `observer.json` in the working directory),
-`chat` (chat lines; `ARENA_CHAT_WAKE=mention|all` makes them urgent) and
+`chat` (other players' chat and whispers, and system lines such as
+"Respawn point set"; `MF_CHAT_WAKE=mention` wakes on your name and whispers,
+`all` on every player line) and
 `watchdog` (long-term trends: no progress for minutes, circling, repeated
 deaths). `MF_DEFAULT_SCRIPTS` lists which to start (default
 `observer,chat,watchdog`).
@@ -115,4 +124,24 @@ deaths). `MF_DEFAULT_SCRIPTS` lists which to start (default
   in its own event loop (`host/runner.mjs`).
 - `host/run.mjs`: runs one module on a character and streams its output.
 
-Several characters: `MF_USERNAMES=a,b`; pick one with `--bot NAME`.
+Several characters: `MF_USERNAMES=a,b`; pick one with `--bot NAME`. Each
+character has its own process and default scripts, but there is one
+controlling program for all of them (a new one replaces the current one,
+whichever character it runs on) and idle runs on the first character only.
+
+## Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `MF_USERNAME` / `MF_USERNAMES` | (required) | Character name(s) |
+| `MF_HOST`, `MF_PORT` | (required), 25565 | Server (`ARENA_MINECRAFT_HOST`/`_PORT` still work) |
+| `MC_VERSION` | 1.21.1 | Game version |
+| `MF_AUTH`, `MF_PROFILES_DIR` | offline | `microsoft` logs in with an account; profiles are cached in the directory |
+| `MF_STATE_DIR` | `./.mf` | State, sockets and logs |
+| `MF_WAIT_SECONDS`, `MF_STALL_SECONDS` | 30, 20 | Defaults for `--wait` and `--stall` |
+| `MF_IDLE` | on | `off` turns idle off |
+| `MF_DEFAULT_SCRIPTS` | `observer,chat,watchdog` | Which default scripts run |
+| `MF_CHAT_WAKE` | none | `mention` or `all` (see above) |
+
+A character process that keeps exiting is restarted after 2 s, then later each
+time, up to a minute.

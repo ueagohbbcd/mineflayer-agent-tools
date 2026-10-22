@@ -14,19 +14,21 @@
  * Options for run and wait:
  *   --wait S        return after S seconds while the program keeps running
  *                   (default 30; 0 returns at once)
- *   --stall S       return early when the program printed nothing and the
- *                   character neither moved nor changed inventory for S
- *                   seconds (default 60; 0 turns it off)
+ *   --stall S       return early when, for S seconds, the program printed
+ *                   nothing and the character's position, health, food and
+ *                   inventory did not change (default 20; 0 turns it off;
+ *                   only used when it is shorter than --wait)
  *   --bot NAME      which character (default: the first)
  *   --background    a read-only helper: it does not replace the controlling
  *                   program and is never interrupted
  *
- * State lives in MF_STATE_DIR (default ./.mf). `mf start` needs MF_USERNAME
- * (or MF_USERNAMES) and ARENA_MINECRAFT_HOST.
+ * State lives in MF_STATE_DIR (default ./.mf, so run mf from the directory
+ * where you started it). `mf start` needs MF_USERNAME (or MF_USERNAMES) and
+ * MF_HOST.
  */
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,12 +44,18 @@ function request(message) {
     socket.setEncoding("utf8");
     socket.once("connect", () => socket.write(`${JSON.stringify(message)}\n`));
     socket.on("data", (chunk) => (buffer += chunk));
-    socket.once("error", fail);
+    socket.once("error", (error) =>
+      fail(
+        error.code === "ENOENT" || error.code === "ECONNREFUSED"
+          ? Object.assign(new Error(`No supervisor in ${stateDir}; run \`mf start\` first`), { code: error.code })
+          : error,
+      ),
+    );
     socket.once("close", () => {
       try {
         done(JSON.parse(buffer));
       } catch {
-        fail(new Error("The supervisor closed the connection without a result"));
+        fail(new Error("No result: the supervisor stopped or dropped the connection"));
       }
     });
   });
@@ -63,7 +71,10 @@ function parse(argv) {
       const value = Number(argv[++i]);
       if (!Number.isFinite(value) || value < 0) throw new Error(`${arg} needs seconds`);
       options[arg.slice(2)] = value;
-    } else if (arg === "--bot") options.bot = argv[++i];
+    } else if (arg === "--bot") {
+      options.bot = argv[++i];
+      if (!options.bot) throw new Error("--bot needs a character name");
+    }
     else if (arg === "--background") options.background = true;
     else rest.push(arg);
   }
@@ -152,7 +163,12 @@ async function start() {
       await new Promise((done) => setTimeout(done, 500));
     }
   }
-  throw new Error(`The supervisor did not start; see ${logFile}`);
+  // The character's own connection error says more than the timeout after it.
+  const lines = (await readFile(logFile, "utf8").catch(() => "")).split("\n");
+  const reason =
+    lines.filter((line) => line.startsWith("Minecraft bot: ")).at(-1) ??
+    lines.filter((line) => /Error\b/.test(line)).at(-1);
+  throw new Error(`The supervisor did not start${reason ? `: ${reason.trim()}` : ""}; see ${logFile}`);
 }
 
 async function main() {
@@ -161,8 +177,21 @@ async function main() {
   switch (command) {
     case "start":
       return start();
-    case "stop":
-      return print(await request({ type: "shutdown" }));
+    case "stop": {
+      const result = await request({ type: "shutdown" });
+      if (result.status === "error") return print(result);
+      // Wait until it is gone, so that `mf start` right after cannot race it.
+      for (let i = 0; i < 300 && result.pid; i++) {
+        try {
+          process.kill(result.pid, 0);
+        } catch {
+          break;
+        }
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      process.stdout.write("Stopped\n");
+      return;
+    }
     case "run":
       if (!rest[0]) throw new Error("usage: mf run [options] FILE [ARGS...]");
       return print(
@@ -182,6 +211,10 @@ async function main() {
       const result = await request({ type: "snapshot", args: rest, cwd: process.cwd(), ...options });
       if (result.status === "error") return print(result);
       process.stdout.write(result.stdout || `${header(result)}\n${result.stderr ?? ""}\n`);
+      if (result.outputDroppedBytes)
+        process.stderr.write(
+          `mf: the snapshot was cut (${result.outputDroppedBytes} bytes dropped); see ${result.logDir ?? "the logs"}\n`,
+        );
       return;
     }
     default:

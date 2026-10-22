@@ -1,12 +1,16 @@
 import net from "node:net";
 
 /** One-shot control RPC. Game reads and actions stay inside the native module. */
-export function request(socketPath, message) {
+export function request(socketPath, message, { timeoutMs = 10000 } = {}) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(
       typeof socketPath === "string"
         ? socketPath
         : { host: socketPath.host, port: socketPath.port },
+    );
+    // A host blocked by a synchronous loop accepts but never answers.
+    socket.setTimeout(timeoutMs, () =>
+      socket.destroy(new Error(`Host did not answer within ${timeoutMs} ms`)),
     );
     let buffer = "";
     socket.setEncoding("utf8");
@@ -26,7 +30,8 @@ export function request(socketPath, message) {
     });
     socket.once("error", reject);
     socket.once("close", () => {
-      if (buffer && !buffer.includes("\n"))
+      // Settled already when a full line arrived; otherwise this rejects.
+      if (!buffer.includes("\n"))
         reject(new Error("Host closed the RPC without a complete response"));
     });
   });

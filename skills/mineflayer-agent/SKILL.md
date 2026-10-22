@@ -9,7 +9,7 @@ You control a character through [Mineflayer](https://github.com/PrismarineJS/min
 
 ## Install and join
 
-Node 18 or newer. In a working directory:
+Node 22 or newer. In a working directory:
 
 ```sh
 npm install mineflayer mineflayer-pathfinder vec3
@@ -39,7 +39,7 @@ Keep one connection per character and keep it alive: a long-running process that
 This package ships that long-running process. From your working directory:
 
 ```sh
-export MF_USERNAME=Steve ARENA_MINECRAFT_HOST=localhost
+export MF_USERNAME=Steve MF_HOST=localhost
 npx mf start                          # connects the character, keeps it alive
 npx mf run look.mjs                   # runs one module, prints its result and the reports since your last result
 npx mf run --wait 20 walk.mjs 100 -40 # come back after 20 s while it keeps walking

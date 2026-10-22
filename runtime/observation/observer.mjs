@@ -11,9 +11,9 @@ import { createReportPolicy } from "./report-policy.mjs";
 
 // The default observer: createDefaultObserver is the sampling and event
 // policy; startObserver runs it against a bot and reports through an inbox
-// client. packages/default-scripts/observer.mjs is the script that calls it.
+// client. runtime/default-scripts/observer.mjs is the script that calls it.
 
-/** Observation policy over a supplied mirror; no Pi, Inbox or connection ownership. */
+/** Observation policy over a supplied bot; it owns no inbox or connection. */
 export function createDefaultObserver({
   getBot,
   connectionStatus,

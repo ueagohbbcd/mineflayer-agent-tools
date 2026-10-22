@@ -13,7 +13,7 @@
     "url": "https://github.com/ueagohbbcd/mineflayer-agent-tools/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "test": "node --test",
@@ -28,7 +28,9 @@
   "peerDependencies": {
     "mineflayer": ">=4.39.0 <5",
     "prismarine-viewer": "^1.33.0",
-    "mineflayer-pathfinder": "^2.4.5"
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-item": "^1.17.0",
+    "minecraft-data": "^3.114.0"
   },
   "bin": {
     "world-memory": "bin/world-memory.js",
@@ -62,9 +64,6 @@
   },
   "peerDependenciesMeta": {
     "prismarine-viewer": {
-      "optional": true
-    },
-    "mineflayer-pathfinder": {
       "optional": true
     }
   }

@@ -108,6 +108,9 @@ export async function idle(bot, { signal, report = () => {} } = {}) {
     signal?.addEventListener("abort", resolve, { once: true });
   });
   clearInterval(timer);
+  // Let an equip, look or meal in flight finish before the next program starts.
+  for (let waited = 0; busy && waited < 3000; waited += 50)
+    await new Promise((done) => setTimeout(done, 50));
   bot.setControlState("jump", false);
   flush(true);
 }

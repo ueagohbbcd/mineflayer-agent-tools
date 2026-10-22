@@ -736,7 +736,10 @@ export function sampleObservation(bot, options = {}) {
   )
     throw new RangeError("entityRadius must be positive");
   const observedAt = clock(options.now);
-  const sampledAt = finite(bot?.sampledAt ?? options._lifecycle?.sampledAt);
+  // A native Mineflayer bot is live: its state is sampled as it is read.
+  const sampledAt =
+    finite(bot?.sampledAt ?? options._lifecycle?.sampledAt) ??
+    (bot?.entity && bot.sampledAt === undefined ? observedAt : null);
   const ageMs = sampledAt === null ? null : Math.max(0, observedAt - sampledAt);
   const disconnected =
     bot?.closed === true ||

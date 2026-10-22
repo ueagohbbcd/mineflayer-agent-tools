@@ -376,9 +376,13 @@ export class TaskManager {
    * `stallMs` ends the wait early with reason "no progress" when the task
    * printed nothing and `progress()` (an optional sync function returning a
    * comparable key, such as the character's rounded position) stayed the same
-   * for that long. 0 or unset waits the full `timeoutMs`.
+   * for that long. 0 or unset waits the full `timeoutMs`. `urgent: false`
+   * keeps waiting through urgent inbox messages.
    */
-  async wait(id, { timeoutMs = Infinity, signal, stallMs = 0, progress } = {}) {
+  async wait(
+    id,
+    { timeoutMs = Infinity, signal, stallMs = 0, progress, urgent = true } = {},
+  ) {
     if (
       timeoutMs !== Infinity &&
       (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)
@@ -389,10 +393,11 @@ export class TaskManager {
     const task = this.get(id);
     const finish = () => this.claim(task);
     if (task.status === "completed") return finish();
-    if (this.urgentReason || signal?.aborted || timeoutMs === 0)
+    const urgentReason = urgent ? this.urgentReason : null;
+    if (urgentReason || signal?.aborted || timeoutMs === 0)
       return this.running(
         task,
-        this.urgentReason ||
+        urgentReason ||
           (signal?.aborted ? "caller detached" : "wait timeout"),
       );
     const reason = await new Promise((resolve) => {
@@ -406,6 +411,7 @@ export class TaskManager {
         resolve(reason);
       };
       const abort = () => wake("caller detached");
+      wake.ignoresUrgent = !urgent;
       task.waiters.add(wake);
       signal?.addEventListener("abort", abort, { once: true });
       if (timeoutMs !== Infinity)
@@ -432,7 +438,7 @@ export class TaskManager {
   releaseAll(reason = "urgent inbox message") {
     this.urgentReason = reason;
     for (const task of this.tasks.values())
-      for (const wake of [...task.waiters]) wake(reason);
+      for (const wake of [...task.waiters]) if (!wake.ignoresUrgent) wake(reason);
   }
   resumeWaits() {
     this.urgentReason = null;

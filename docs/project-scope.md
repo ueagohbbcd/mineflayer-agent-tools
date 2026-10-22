@@ -1,8 +1,9 @@
 # Scope: Mineflayer agent utilities
 
-This project is not a second Mineflayer, storage engine, pathfinder, or agent runtime.
+This project is not a second Mineflayer, storage engine or pathfinder.
 
-Own only passive, composable helpers: optional history of *received* chunks;
+It has two layers. The libraries (repository root, `lib/`) are passive,
+composable helpers: optional history of *received* chunks;
 bounded perception / spatial queries; read-only visual inspection; generic
 watchdogs with caller-owned reporting. Preserve unknown vs known air and
 freshness/timestamp metadata.
@@ -16,8 +17,14 @@ evaluate `prismarine-world` and the Prismarine storage providers. Any migration
 must explicitly handle older saved files, dimension/version separation,
 timestamps, and the async-storage vs synchronous-query contract.
 
-Arena rules, teams, Pi, Inbox, scheduling, trusted messages and bot RPC remain
-outside this library.
+The runtime (`runtime/`, the `mf` command) lets any agent with a shell play
+through a real Mineflayer bot one step at a time: the bot processes, a report
+queue, program scheduling with logs, idle behaviour and default observers
+(see [runtime/README.md](../runtime/README.md)). It builds on the libraries;
+the libraries never import it.
+
+Arena rules, teams, Pi, trusted messages and match scheduling remain outside
+this repository.
 
 Repository name: `mineflayer-agent-tools` (renamed from `mineflayer-world-memory`).
 The package/import name stays `mineflayer-world-memory` for now, for backward
@@ -37,6 +44,8 @@ later, separate breaking change.
 - Craft Arena depends on the libraries only, through a pinned commit tarball. It
   does not install this repository's skills: it copies the parts it needs and
   rewrites them as its own smaller skills for the match rules.
+- Craft Arena can use the runtime for its participants instead of keeping its
+  own copy.
 - Libraries never import an inbox, match clock or arena session. Reporting goes
   through a callback or object the caller passes in (for example
   `watchdog(bot, { report })`).

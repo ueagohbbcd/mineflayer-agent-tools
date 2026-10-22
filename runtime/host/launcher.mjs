@@ -35,12 +35,16 @@ export function hostEnv(env, { name, runSocket, index, runDir }) {
 export async function startBotHosts({
   env = process.env,
   names = botNames(env),
-  runDir = join(env.TMPDIR || "/tmp", "arena-bots"),
+  runDir = join(env.TMPDIR || "/tmp", "mf-bots"),
+  // A host that exits soon after it started is restarted later each time
+  // (up to maxRestartMs), so a server that is down is not hammered.
   restartMs = 2000,
+  maxRestartMs = 60000,
   spawnHost = (hostEnvironment) =>
     spawn(process.execPath, [hostCli], {
-      env: hostEnvironment,
-      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...hostEnvironment, MF_SUPERVISED: "1" },
+      // The host exits when this pipe closes, that is when we are gone.
+      stdio: ["pipe", "inherit", "inherit"],
     }),
   log = (line) => process.stderr.write(`${line}\n`),
   // Called with (host, { code, signal }) when a host exits and will restart.
@@ -60,14 +64,16 @@ export async function startBotHosts({
   const botsFile = join(runDir, "bots.json");
   let persistChain = Promise.resolve();
   const persist = () => {
-    persistChain = persistChain.then(() =>
+    const write = persistChain.then(() =>
       writeFile(
         botsFile,
         `${JSON.stringify({ bots: bots.map(({ name, runSocket, pid, generation }) => ({ name, runSocket, ...(pid ? { pid, generation } : {}) })) }, null, 2)}\n`,
         { mode: 0o600 },
       ),
     );
-    return persistChain;
+    // One failed write must not stop the later ones.
+    persistChain = write.catch(() => {});
+    return write;
   };
   await persist();
   let closed = false;
@@ -78,6 +84,7 @@ export async function startBotHosts({
     host.generation = randomUUID();
     host.environment.ARENA_BOT_HOST_GENERATION = host.generation;
     const child = spawnHost(host.environment);
+    const startedAt = Date.now();
     host.pid = child.pid;
     children.set(host.name, child);
     void persist().catch((error) =>
@@ -92,13 +99,16 @@ export async function startBotHosts({
       );
       if (closed) return;
       onExit(host, { code, signal });
+      host.failures =
+        Date.now() - startedAt < maxRestartMs ? (host.failures ?? 0) + 1 : 1;
+      const delay = Math.min(maxRestartMs, restartMs * 2 ** (host.failures - 1));
       log(
-        `Bot host ${host.name} exited (${signal ?? code}); restarting in ${restartMs} ms`,
+        `Bot host ${host.name} exited (${signal ?? code}); restarting in ${delay} ms`,
       );
       const timer = setTimeout(() => {
         timers.delete(timer);
         start(host);
-      }, restartMs);
+      }, delay);
       timers.add(timer);
     });
     child.once("error", (error) =>
@@ -106,7 +116,7 @@ export async function startBotHosts({
     );
   };
   for (const host of bots) start(host);
-  await persistChain;
+  await persist();
   const [main] = bots;
   return {
     bots,

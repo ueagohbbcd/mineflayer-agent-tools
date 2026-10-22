@@ -15,8 +15,12 @@ const sessionUrl = process.env.ARENA_SESSION_URL
   ? `${process.env.ARENA_SESSION_URL}${process.env.ARENA_SESSION_URL.includes("?") ? "&" : "?"}username=${encodeURIComponent(username)}`
   : null;
 const bot = createCompatibleBot({
-  host: required("ARENA_MINECRAFT_HOST"),
-  port: Number(process.env.ARENA_MINECRAFT_PORT ?? 25565),
+  // ARENA_MINECRAFT_* are the older names, still read.
+  host:
+    process.env.MF_HOST ||
+    process.env.ARENA_MINECRAFT_HOST ||
+    required("MF_HOST"),
+  port: Number(process.env.MF_PORT ?? process.env.ARENA_MINECRAFT_PORT ?? 25565),
   version: process.env.MC_VERSION ?? "1.21.1",
   username,
   auth: process.env.MF_AUTH ?? "offline",
@@ -76,6 +80,9 @@ const stop = async (code = 0) => {
     bot.quit("Bot host stopping");
   } catch {}
   process.exitCode = code;
+  // Give the disconnect a moment to reach the server, then leave even if a
+  // handle (such as the supervisor's stdin pipe) is still open.
+  setTimeout(() => process.exit(code), 500).unref();
 };
 
 bot.once("spawn", async () => {
@@ -123,3 +130,9 @@ bot.on("error", (error) =>
 );
 process.once("SIGTERM", () => void stop());
 process.once("SIGINT", () => void stop());
+// Under the launcher, stdin is a pipe from the supervisor: when that process is
+// gone (even killed), the character leaves instead of staying on as an orphan.
+if (process.env.MF_SUPERVISED === "1") {
+  process.stdin.on("data", () => {});
+  process.stdin.once("close", () => void stop());
+}
