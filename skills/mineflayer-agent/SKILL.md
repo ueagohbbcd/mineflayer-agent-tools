@@ -34,6 +34,20 @@ bot.on("error", (error) => console.log("error", error.message));
 
 Keep one connection per character and keep it alive: a long-running process that owns `bot` and runs your programs one after another works better than reconnecting for every step. Wait for `spawn` before reading the world.
 
+## Run programs with `mf` (recommended)
+
+This package ships that long-running process. From your working directory:
+
+```sh
+export MF_USERNAME=Steve ARENA_MINECRAFT_HOST=localhost
+npx mf start                          # connects the character, keeps it alive
+npx mf run look.mjs                   # runs one module, prints its result and the reports since your last result
+npx mf run --wait 20 walk.mjs 100 -40 # come back after 20 s while it keeps walking
+npx mf wait <taskId>                  # keep waiting on it
+```
+
+A module is `export default async function (bot, { signal, args, log }) { ... }`. Each `mf run` comes back `completed`, `running` (still going: your wait was up, it made no progress, or something needs your attention), `interrupted` (death, disconnect, a blocked loop, or you started another program) or `not_started` (the character died since your last result: read the reports first). Between your programs the character defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that. Details: [runtime/README.md](../../runtime/README.md).
+
 ## How to work
 
 - **Look, act, check.** Read the state you need (position, health, inventory, the blocks around you), do one bounded thing, then read again. The game keeps running between programs: mobs attack, water drowns, items despawn. Leave the character somewhere safe when a program ends.
@@ -50,7 +64,8 @@ Keep one connection per character and keep it alive: a long-running process that
 | Remember chunks after they unload | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`. |
 | A picture of the terrain or a structure | `mineflayer-world-memory/live.mjs`: `observationViewBounds`, `surfaceSnapshotFromBot` + `renderTexturedSurface`, `snapshotFromBot` + `renderOblique`, `saveRender` (see `docs/live-visual.md`). Blank means not received, not air. |
 | The logs of one tree before chopping | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`. |
-| Notice a stuck or looping program | `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
+| Notice a stuck or looping program | Under `mf`: ``(await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`)).watchdog(bot)``, which reports into your results. Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
+| One full sample of your state | `mf snapshot` |
 
 ## Guides
 
