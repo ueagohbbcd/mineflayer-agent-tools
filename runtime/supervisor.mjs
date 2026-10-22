@@ -352,7 +352,10 @@ export async function startSupervisor({
     const cwdOf = request.cwd || cwd;
     const file = isAbsolute(request.file) ? request.file : resolve(cwdOf, request.file);
     if (!existsSync(file)) throw new Error(`No such module: ${file}`);
-    const background = request.background === true;
+    // A module that declares itself read-only runs beside the controller.
+    const background =
+      request.background === true ||
+      /^export\s+const\s+control\s*=\s*false\b/m.test(await readFile(file, "utf8"));
     if (!background) {
       if (major)
         return {
