@@ -108,9 +108,10 @@ export async function idle(bot, { signal, report = () => {} } = {}) {
     signal?.addEventListener("abort", resolve, { once: true });
   });
   clearInterval(timer);
-  // Let an equip, look or meal in flight finish before the next program starts.
-  for (let waited = 0; busy && waited < 3000; waited += 50)
-    await new Promise((done) => setTimeout(done, 50));
+  // Let an equip, look or meal in flight finish before the next program
+  // starts; returning earlier would leave it acting on the bot. If it never
+  // finishes, the host's cancellation grace restarts the character instead.
+  while (busy) await new Promise((done) => setTimeout(done, 50));
   bot.setControlState("jump", false);
   flush(true);
 }

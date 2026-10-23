@@ -23,6 +23,16 @@ queue, program scheduling with logs, idle behaviour and default observers
 (see [runtime/README.md](../runtime/README.md)). It builds on the libraries;
 the libraries never import it.
 
+Inside the runtime, a small core does not depend on any replaceable part: the
+character processes and their liveness, one controlling program per
+character, cancellation and cleanup, and the record of what each result has
+given the caller. The default scripts (observer, chat, trend watchdog), idle
+and the routines in `examples/` are replaceable modules on top: turning one
+off or replacing it must not change who controls a character, how a death
+stops its program, or how a blocked process is recovered. Idle only acts
+while no program controls the character; behaviour while a program runs
+(defending on a walk, say) belongs in routines the model chooses to run.
+
 Arena rules, teams, Pi, trusted messages and match scheduling remain outside
 this repository.
 

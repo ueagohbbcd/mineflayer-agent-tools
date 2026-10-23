@@ -100,6 +100,8 @@ bot.once("spawn", async () => {
           const previous = session;
           session = await readSession();
           sessionFailure = undefined;
+          if (previous && previous.state !== session.state)
+            runner?.lifecycle({ event: "session", from: previous.state, state: session.state });
           if (previous?.state === "running" && session.state !== "running") {
             bot.clearControlStates?.();
             bot.pathfinder?.stop?.();
@@ -116,6 +118,18 @@ bot.once("spawn", async () => {
       readSession: async () => session ?? readSession(),
       cancellationGraceMs: Number(process.env.ARENA_CANCEL_GRACE_MS ?? 5000),
     });
+    // Lifecycle events for the supervisor, independent of any default script.
+    let dimension = bot.game?.dimension;
+    bot.on("death", () => runner.lifecycle({ event: "death" }));
+    bot.on("spawn", () => {
+      const now = bot.game?.dimension;
+      if (now && dimension && now !== dimension)
+        runner.lifecycle({ event: "dimension", from: dimension, to: now });
+      dimension = now ?? dimension;
+    });
+    bot.on("kicked", (reason) =>
+      runner.lifecycle({ event: "disconnected", reason: (typeof reason === "string" ? reason : JSON.stringify(reason)).slice(0, 300) }),
+    );
     process.stdout.write(`Bot host ready: ${bot.username}\n`);
   } catch (error) {
     process.stderr.write(`Bot host startup failed: ${error.stack ?? error}\n`);

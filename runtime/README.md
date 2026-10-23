@@ -2,8 +2,9 @@
 
 `mf` lets an agent that only has a shell play through a real Mineflayer bot.
 The agent writes a module, runs it with `mf run`, and gets one result back:
-what the module printed, how it ended, and every report (state changes,
-damage, deaths, chat, watchdog findings) since the previous result. Then it
+what the module printed, how it ended, what changed for the characters, and
+the reports (state changes, damage, chat, watchdog findings) since the
+previous result. Then it
 thinks and runs the next module. Nothing has to wake the agent, and the agent
 never has to keep track of time.
 
@@ -45,9 +46,26 @@ none).
 | Result | When |
 | --- | --- |
 | `completed` | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr). |
-| `running` | The module is still running: `--wait` seconds passed (default 30; `0` returns at once), it made no progress for `--stall` seconds (default 20, used only when shorter than `--wait`: nothing printed and the character's position, health, food and inventory did not change), or an urgent report needs your attention (low health, a large hit, a chat mention, `requestJudgment`). Use `mf wait TASK_ID` to keep waiting, or run something else. |
-| `interrupted` | The module was stopped because its plan no longer holds: the character died or disconnected, its process was blocked by a synchronous loop, a new program replaced it, or you ran `mf cancel`. |
-| `not_started` | The character died, disconnected or its process crashed since your last result. The module was not run; read the reports and decide again. |
+| `running` | The module is still running: `--wait` seconds passed (default 30; `0` returns at once), no progress was detected for `--stall` seconds (default 20, used only when shorter than `--wait`: nothing printed and the character's position, health, food and inventory did not change; the program may still be fine, for example waiting for something), or an urgent report needs your attention (low health, a large hit, a chat mention, `requestJudgment`). Use `mf wait TASK_ID` to keep waiting, or run something else. |
+| `interrupted` | The module was stopped because its plan no longer holds: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. |
+| `not_started` | Something changed for this character since your last result. The module was not run; read the result and decide again. |
+
+**Changes** stop the character's program and keep the next one from starting
+until a result has shown them (lines starting with `! changed:`): the
+character died, moved to another dimension, the session state changed, it
+disconnected, its process crashed or stopped answering, or a watchdog found a
+blocked loop. They come from the character's process directly, so they hold
+whatever default scripts run. A program or an adapter can add its own by
+putting `major: "reason"` in a report's data.
+
+A result shows the program's output (the last 8000 bytes, `MF_OUTPUT_BYTES`;
+the rest is in the logs) and the reports that fit in 16000 bytes
+(`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next result
+(`mf events`). Reports and changes count as given only after `mf` has printed
+the result: if `mf` is killed or its reader goes away first, they come again
+next time. Whatever reads `mf`'s output after that (a harness that cuts long
+tool results, say) is outside what `mf` can see, so keep the budgets below
+what your harness shows.
 
 `--wait` is your estimate of how long the program needs; output printed so far
 comes back with `running`, and the full output is in the log directory.
@@ -60,6 +78,13 @@ that ignores its abort signal gets its character process restarted). A
 read-only module, marked with `export const control = false` in the module or
 `--background` on the command line, runs beside the controller, is never
 interrupted, and never stops the character's movement when it ends.
+
+When a controlling module ends, however it ends, the character releases its
+movement keys and stops Pathfinder and PvP. A module that sets a goal and
+returns does not leave the character walking: wait for the walk inside the
+module. Cancelling is cooperative (the module's `signal` aborts); a module
+that keeps running after that gets its character's process restarted, which
+is the only way to stop code that does not cooperate.
 
 ## Between programs: idle
 
@@ -125,9 +150,15 @@ deaths). `MF_DEFAULT_SCRIPTS` lists which to start (default
 - `host/run.mjs`: runs one module on a character and streams its output.
 
 Several characters: `MF_USERNAMES=a,b`; pick one with `--bot NAME`. Each
-character has its own process and default scripts, but there is one
-controlling program for all of them (a new one replaces the current one,
-whichever character it runs on) and idle runs on the first character only.
+character has its own process, default scripts, idle, controlling program and
+changes: a program on one character never replaces or blocks another's.
+Reports name their character; a report from a process of the character that
+has since restarted says `before a restart`.
+
+The supervisor keeps a connection to each character's process that carries a
+heartbeat every second. A process silent for 20 s
+(`MF_HOST_UNRESPONSIVE_SECONDS`; `0` turns this off), such as one stuck in a
+synchronous loop, is killed and restarted, and its program is interrupted.
 
 ## Settings
 
@@ -142,6 +173,8 @@ whichever character it runs on) and idle runs on the first character only.
 | `MF_IDLE` | on | `off` turns idle off |
 | `MF_DEFAULT_SCRIPTS` | `observer,chat,watchdog` | Which default scripts run |
 | `MF_CHAT_WAKE` | none | `mention` or `all` (see above) |
+| `MF_OUTPUT_BYTES`, `MF_REPORT_BYTES` | 8000, 16000 | How much program output and report text one result shows |
+| `MF_HOST_UNRESPONSIVE_SECONDS` | 20 | Restart a character's process after this long without a heartbeat |
 
 A character process that keeps exiting is restarted after 2 s, then later each
 time, up to a minute.

@@ -39,5 +39,6 @@ export function request(socketPath, message, { timeoutMs = 10000 } = {}) {
 
 export const cancel = (socketPath, id) =>
   request(socketPath, { type: "cancel", id });
-export const status = (socketPath) => request(socketPath, { type: "status" });
+export const status = (socketPath, options) =>
+  request(socketPath, { type: "status" }, options);
 export const session = (socketPath) => request(socketPath, { type: "session" });

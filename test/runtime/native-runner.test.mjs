@@ -119,7 +119,9 @@ test("a module runs on the native bot; its listeners and timers go when it ends"
   assert.equal(typeof bot.dig, "function");
   bot.emit("chat");
   await delay(10);
-  assert.deepEqual(bot.calls, []);
+  // A controlling run that returns still lets go of movement.
+  assert.deepEqual(bot.calls, ["clear", "pathfinder.stop"]);
+  bot.calls.length = 0;
 
   const failed = await run(
     `export default async () => { throw new Error("boom"); }`,

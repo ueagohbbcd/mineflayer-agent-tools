@@ -66,8 +66,10 @@ test("Unix IPC supports SDK semantics, session isolation, permissions and malfor
   await client.requestJudgment({ why: "danger" });
   const batch = inbox.drain();
   assert.equal(batch.messages.length, 3);
-  assert.equal(batch.messages[1].data, 2);
-  assert.equal(batch.messages[2].priority, "urgent");
+  // Urgent messages come first, then the rest in order.
+  assert.equal(batch.messages[0].priority, "urgent");
+  assert.deepEqual(batch.messages[1].data, { observation: 1 });
+  assert.equal(batch.messages[2].data, 2);
   await assert.rejects(
     new InboxClient({ socketPath, sessionId: "bad" }).post(1),
     /Session/,

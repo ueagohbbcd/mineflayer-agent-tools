@@ -46,7 +46,7 @@ npx mf run --wait 20 walk.mjs 100 -40 # come back after 20 s while it keeps walk
 npx mf wait <taskId>                  # keep waiting on it
 ```
 
-A module is `export default async function (bot, { signal, args, log }) { ... }`. Each `mf run` comes back `completed`, `running` (still going: your wait was up, it made no progress, or something needs your attention), `interrupted` (death, disconnect, a blocked loop, or you started another program) or `not_started` (the character died since your last result: read the reports first). Between your programs the character defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that. Details: [runtime/README.md](../../runtime/README.md).
+A module is `export default async function (bot, { signal, args, log }) { ... }`. Each `mf run` comes back `completed`, `running` (still going: your wait was up, it made no progress, or something needs your attention), `interrupted` (death, disconnect, a blocked loop, or you started another program) or `not_started` (something changed for the character since your last result, shown as `! changed:` lines: read the result first). When a program ends, the character stops walking and fighting, so wait for a walk inside the program. Between your programs the character defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that. Details: [runtime/README.md](../../runtime/README.md).
 
 ## How to work
 

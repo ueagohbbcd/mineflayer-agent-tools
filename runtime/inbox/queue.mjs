@@ -104,19 +104,29 @@ export class Inbox extends EventEmitter {
         "minDeliveryDelayMs requires a nonnegative integer and delayed normal state",
       );
     const ttl = input.ttlMs ?? this.ttlMs;
-    if (!Number.isFinite(ttl) || ttl <= 0)
+    // Infinity keeps a message until it is delivered or pushed out.
+    if (typeof ttl !== "number" || !(ttl > 0))
       throw new Error("Invalid message TTL");
     this.prune();
     const createdAt = this.now();
+    // Which character, and which process of it, a program's message came from.
+    const origin = {
+      ...(typeof input.bot === "string" && input.bot ? { bot: input.bot } : {}),
+      ...(typeof input.generation === "string" && input.generation
+        ? { generation: input.generation }
+        : {}),
+    };
+    // A state replaces the pending one with the same key from the same
+    // source, character and process: one character's observer never replaces
+    // another's, and a restarted one never replaces what the last one saw.
+    const sameState = (item) =>
+      item.message.kind === "state" &&
+      item.message.source === source &&
+      item.message.key === key &&
+      item.message.bot === origin.bot &&
+      item.message.generation === origin.generation;
     const previous =
-      kind === "state"
-        ? this.items.find(
-            (item) =>
-              item.message.kind === "state" &&
-              item.message.source === source &&
-              item.message.key === key,
-          )
-        : undefined;
+      kind === "state" ? this.items.find(sameState) : undefined;
     // Updating a pending state never moves its first eligibility time later.
     const eligibleAt =
       priority === "urgent"
@@ -131,7 +141,7 @@ export class Inbox extends EventEmitter {
       data,
       priority,
       createdAt,
-      expiresAt: createdAt + ttl,
+      ...(Number.isFinite(ttl) ? { expiresAt: createdAt + ttl } : {}),
       ...(kind === "state" &&
       (delay > 0 || (previous?.eligibleAt ?? 0) > createdAt)
         ? { eligibleAt }
@@ -139,12 +149,13 @@ export class Inbox extends EventEmitter {
       ...(typeof input.taskId === "string" && input.taskId
         ? { taskId: input.taskId }
         : {}),
+      ...origin,
     };
     const encoded = JSON.stringify(message);
     const bytes = Buffer.byteLength(encoded);
     if (kind === "current") {
       this.pruneCurrent();
-      const identity = JSON.stringify([source, key]);
+      const identity = JSON.stringify([source, origin.bot ?? null, key]);
       if (data === null) {
         this.removeCurrent(identity);
         return { accepted: true, id: message.id, cleared: true };
@@ -166,12 +177,7 @@ export class Inbox extends EventEmitter {
     }
     if (kind === "state")
       for (const old of [...this.items])
-        if (
-          old.message.kind === "state" &&
-          old.message.key === key &&
-          old.message.source === source
-        )
-          this.remove(old.id, "replaced");
+        if (sameState(old)) this.remove(old.id, "replaced");
     while (
       this.items.length >= this.maxItems ||
       this.bytes + bytes > this.maxBytes
@@ -183,7 +189,7 @@ export class Inbox extends EventEmitter {
       id: message.id,
       message: JSON.parse(encoded),
       bytes,
-      expiresAt: message.expiresAt,
+      expiresAt: createdAt + ttl,
       eligibleAt,
       onDelivered,
       onLost,
@@ -207,7 +213,8 @@ export class Inbox extends EventEmitter {
   }
   pruneCurrent() {
     for (const [identity, value] of this.current)
-      if (value.message.expiresAt <= this.now()) this.removeCurrent(identity);
+      if ((value.message.expiresAt ?? Infinity) <= this.now())
+        this.removeCurrent(identity);
   }
   currentSnapshot() {
     this.pruneCurrent();
@@ -234,13 +241,48 @@ export class Inbox extends EventEmitter {
   }
   /** Claim and acknowledge only at the final model-visible boundary. */
   drain() {
+    const batch = this.select();
+    return { ...batch, ...this.commit(batch) };
+  }
+  /**
+   * Choose what one result can carry without removing anything: urgent
+   * messages first, then the rest, each group oldest first, whole messages
+   * only, up to `maxBytes` (the first message is always taken, so a large one
+   * cannot block the queue). Pass the batch to commit() once the caller has
+   * it; until then the messages stay queued and a lost result loses nothing.
+   */
+  select({ maxBytes = Infinity } = {}) {
     this.prune();
     const now = this.now();
-    const items = this.items.filter((item) => (item.eligibleAt ?? 0) <= now);
-    const dropped = this.dropped;
-    this.items = this.items.filter((item) => (item.eligibleAt ?? 0) > now);
+    const eligible = this.items.filter((item) => (item.eligibleAt ?? 0) <= now);
+    const ordered = [
+      ...eligible.filter((item) => item.message.priority === "urgent"),
+      ...eligible.filter((item) => item.message.priority !== "urgent"),
+    ];
+    const items = [];
+    let bytes = 0;
+    for (const item of ordered) {
+      if (items.length && bytes + item.bytes > maxBytes) break;
+      items.push(item);
+      bytes += item.bytes;
+    }
+    return {
+      sessionId: this.sessionId,
+      ids: items.map((item) => item.id),
+      messages: items.map((item) => item.message),
+      remaining: eligible.length - items.length,
+      dropped: { ...this.dropped },
+    };
+  }
+  /** Mark a selected batch delivered; messages replaced meanwhile are skipped. */
+  commit({ ids, dropped = { overflow: 0, expired: 0 } }) {
+    const wanted = new Set(ids);
+    const items = this.items.filter((item) => wanted.has(item.id));
+    this.items = this.items.filter((item) => !wanted.has(item.id));
     this.bytes = this.items.reduce((sum, item) => sum + item.bytes, 0);
-    this.dropped = { overflow: 0, expired: 0 };
+    // Drops counted after the batch was chosen are reported next time.
+    for (const reason of ["overflow", "expired"])
+      this.dropped[reason] = Math.max(0, this.dropped[reason] - (dropped[reason] ?? 0));
     const deliveryErrors = [];
     for (const item of items) {
       this.settle(item.id, "delivered");
@@ -264,9 +306,6 @@ export class Inbox extends EventEmitter {
       }
     }
     return {
-      sessionId: this.sessionId,
-      messages: items.map((x) => x.message),
-      dropped,
       totalDropped: { ...this.totalDropped },
       ...(deliveryErrors.length ? { deliveryErrors } : {}),
     };

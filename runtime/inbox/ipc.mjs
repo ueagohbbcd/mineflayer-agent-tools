@@ -111,11 +111,14 @@ export class InboxClient {
     socketPath = process.env.MC_INBOX_SOCKET,
     sessionId = process.env.MC_INBOX_SESSION,
     taskId = process.env.MC_INBOX_TASK_ID,
+    // Inside a character's process: which character, and which process of it.
+    bot = process.env.MF_CHARACTER,
+    generation = process.env.ARENA_BOT_HOST_GENERATION,
     timeoutMs = 5000,
   } = {}) {
     if (!socketPath) throw new Error("MC_INBOX_SOCKET is required");
     if (!sessionId) throw new Error("MC_INBOX_SESSION is required");
-    Object.assign(this, { socketPath, sessionId, taskId, timeoutMs });
+    Object.assign(this, { socketPath, sessionId, taskId, bot, generation, timeoutMs });
   }
   post(data, options = {}) {
     return this.send({ ...options, kind: "event", data });
@@ -147,6 +150,8 @@ export class InboxClient {
   send(message) {
     const body = JSON.stringify({
       ...(this.taskId ? { taskId: this.taskId } : {}),
+      ...(this.bot ? { bot: this.bot } : {}),
+      ...(this.generation ? { generation: this.generation } : {}),
       ...message,
       sessionId: this.sessionId,
     });

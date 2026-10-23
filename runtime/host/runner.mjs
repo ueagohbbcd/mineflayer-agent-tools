@@ -7,13 +7,20 @@
  * and is started by `run.mjs` over a Unix socket. Each run gets the real bot
  * through a thin wrapper that records the listeners it adds; when the run
  * ends, those listeners and the timers it started are removed. When it is
- * cancelled (or throws), its signal aborts and, unless the module is
- * read-only (`export const control = false`), the bot also releases its
- * movement keys and stops Pathfinder and PvP. console output during a run
- * goes to that run's client (inside a listener callback, use `log`).
+ * cancelled, its signal aborts. When a controlling run ends in any way
+ * (returned, threw or cancelled), the bot releases its movement keys and
+ * stops Pathfinder and PvP, so nothing it started keeps moving the bot once
+ * the next program or idle takes over; read-only modules
+ * (`export const control = false`) leave them alone. console output during a
+ * run goes to that run's client (inside a listener callback, use `log`).
  *
  * Everything shares one process: a synchronous loop in one module stops the
  * bot and every other run until it returns.
+ *
+ * A `watch` request keeps its connection open and gets a heartbeat every
+ * second plus the character's lifecycle events (`lifecycle(event)`). The
+ * supervisor uses it to see a blocked process (no heartbeat) and to learn
+ * about deaths without depending on any report-writing module.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { rm } from "node:fs/promises";
@@ -143,6 +150,7 @@ export async function startRunner({
   listen,
   readSession = async () => undefined,
   cancellationGraceMs = 5000,
+  heartbeatMs = 1000,
   onUnresponsive = () => process.exit(75),
   importModule = (file) =>
     import(`${pathToFileURL(file).href}?run=${Date.now()}`),
@@ -150,6 +158,12 @@ export async function startRunner({
   patchGlobals();
   if (socketPath) await rm(socketPath, { force: true });
   const active = new Set();
+  const watchers = new Set();
+  const heartbeat = setInterval(() => {
+    for (const client of watchers)
+      client.write(`${JSON.stringify({ type: "heartbeat", at: Date.now() })}\n`);
+  }, heartbeatMs);
+  heartbeat.unref?.();
 
   const run = async (client, request) => {
     const controller = new AbortController();
@@ -224,7 +238,7 @@ export async function startRunner({
       active.delete(state);
       for (const [event, fn] of listeners) bot.removeListener(event, fn);
       for (const [clear, handle] of state.timers) globalThis[clear](handle);
-      if (state.control && (cancelled || !result?.ok)) stopMoving(bot);
+      if (state.control) stopMoving(bot);
     }
     send(result);
     client.end();
@@ -251,6 +265,11 @@ export async function startRunner({
         return;
       }
       if (request.type === "run") void run(client, request);
+      else if (request.type === "watch") {
+        watchers.add(client);
+        client.on("close", () => watchers.delete(client));
+        client.write(`${JSON.stringify({ type: "heartbeat", at: Date.now() })}\n`);
+      }
       else if (request.type === "cancel") {
         const state = [...active].find((entry) => entry.id === request.id);
         if (!state)
@@ -311,7 +330,14 @@ export async function startRunner({
   return {
     active: () => active.size,
     address: () => server.address(),
+    /** Tell watchers about a death, respawn, dimension or session change. */
+    lifecycle(event) {
+      for (const client of watchers)
+        client.write(`${JSON.stringify({ type: "lifecycle", at: Date.now(), ...event })}\n`);
+    },
     close: () => {
+      clearInterval(heartbeat);
+      for (const client of watchers) client.destroy();
       for (const state of active) state.cancel?.();
       return new Promise((done) => server.close(() => done()));
     },

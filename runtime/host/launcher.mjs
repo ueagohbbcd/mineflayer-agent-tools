@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { socketPath } from "../socket-path.mjs";
 
 const hostCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -21,6 +22,8 @@ export function hostEnv(env, { name, runSocket, index, runDir }) {
   return {
     ...env,
     MF_USERNAME: name,
+    // Set only inside the character's own process (InboxClient reads it).
+    MF_CHARACTER: name,
     ARENA_RUN_SOCKET: runSocket,
     ARENA_BOT_INDEX: String(index),
     // Do not create a history cache by default. Persist only when opted in.
@@ -53,11 +56,11 @@ export async function startBotHosts({
   await mkdir(runDir, { recursive: true, mode: 0o700 });
   const bots = names.map((name, index) => ({
     name,
-    runSocket: join(runDir, `${name}.sock`),
+    runSocket: socketPath(runDir, `${name}.sock`),
     environment: hostEnv(env, {
       name,
       index,
-      runSocket: join(runDir, `${name}.sock`),
+      runSocket: socketPath(runDir, `${name}.sock`),
       runDir,
     }),
   }));

@@ -32,31 +32,58 @@ import { mkdir, readFile } from "node:fs/promises";
 import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { socketPath } from "../socket-path.mjs";
 
 const stateDir = resolve(process.env.MF_STATE_DIR || join(process.cwd(), ".mf"));
-const controlSocket = join(stateDir, "control.sock");
+const controlSocket = socketPath(stateDir, "control.sock");
 const supervisorScript = fileURLToPath(new URL("../supervisor.mjs", import.meta.url));
 
+// Output of the program shown in one result; the rest is in its logs.
+const outputBytes = Number(process.env.MF_OUTPUT_BYTES ?? 8000);
+
+/**
+ * Send one request and resolve with its result. Results that carry reports
+ * wait for `ack()`: call it once the result is printed, and only then do the
+ * reports count as given (without it they come again next time).
+ */
+let pendingAck = () => {};
 function request(message) {
   return new Promise((done, fail) => {
     const socket = net.connect(controlSocket);
     let buffer = "";
+    let settled = false;
     socket.setEncoding("utf8");
     socket.once("connect", () => socket.write(`${JSON.stringify(message)}\n`));
-    socket.on("data", (chunk) => (buffer += chunk));
-    socket.once("error", (error) =>
+    socket.on("data", (chunk) => {
+      if (settled) return;
+      buffer += chunk;
+      const end = buffer.indexOf("\n");
+      if (end < 0) return;
+      settled = true;
+      try {
+        const result = JSON.parse(buffer.slice(0, end));
+        pendingAck = () => {
+          if (!socket.destroyed) socket.end("ack\n");
+        };
+        done(result);
+      } catch {
+        socket.destroy();
+        fail(new Error("Unreadable result from the supervisor"));
+      }
+    });
+    socket.on("error", (error) => {
+      if (settled) return;
+      settled = true;
       fail(
         error.code === "ENOENT" || error.code === "ECONNREFUSED"
           ? Object.assign(new Error(`No supervisor in ${stateDir}; run \`mf start\` first`), { code: error.code })
           : error,
-      ),
-    );
+      );
+    });
     socket.once("close", () => {
-      try {
-        done(JSON.parse(buffer));
-      } catch {
-        fail(new Error("No result: the supervisor stopped or dropped the connection"));
-      }
+      if (settled) return;
+      settled = true;
+      fail(new Error("No result: the supervisor stopped or dropped the connection"));
     });
   });
 }
@@ -101,12 +128,24 @@ function header(result) {
 }
 
 function report(message) {
-  const { priority, kind, key, taskId, source, createdAt, data, from: origin } = message;
+  const { priority, kind, key, taskId, source, createdAt, data, from: origin, bot, earlierProcess } = message;
   const mark = priority === "urgent" ? "!" : "-";
   const label = data?.type ?? key ?? kind;
   const { type, ...rest } = data && typeof data === "object" ? data : { value: data };
   const from = source === "runtime" ? "runtime" : (origin ?? taskId ?? source);
-  return `${mark} ${label} (${from}, ${new Date(createdAt).toISOString().slice(11, 19)}) ${JSON.stringify(rest)}`;
+  const about = [from, bot && !origin?.includes(bot) ? bot : null, new Date(createdAt).toISOString().slice(11, 19)]
+    .filter(Boolean)
+    .join(", ");
+  return `${mark} ${label} (${about}${earlierProcess ? ", before a restart" : ""}) ${JSON.stringify(rest)}`;
+}
+
+/** The end of `text`, at most `limit` bytes, and how many bytes were left out. */
+function tail(text, limit) {
+  const bytes = Buffer.from(text ?? "", "utf8");
+  if (bytes.length <= limit) return { text: text ?? "", omitted: 0 };
+  let start = bytes.length - limit;
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
+  return { text: bytes.subarray(start).toString("utf8"), omitted: start };
 }
 
 function print(result) {
@@ -119,18 +158,29 @@ function print(result) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  if (result.status !== "events") process.stdout.write(`${header(result)}\n`);
-  if (result.stdout) process.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
-  if (result.stderr) process.stdout.write(`--- stderr ---\n${result.stderr}${result.stderr.endsWith("\n") ? "" : "\n"}`);
-  if (result.previouslyReturnedBytes)
-    process.stdout.write(`(earlier output not repeated; full output in the logs)\n`);
+  // Most important first, so that a harness cutting the end loses the least:
+  // the status, what changed, the program's output, then the other reports.
+  const out = [];
+  if (result.status !== "events") out.push(header(result));
+  for (const change of result.changes ?? [])
+    out.push(`! changed: ${change.reason} (${change.character}, ${new Date(change.at).toISOString().slice(11, 19)})`);
+  const stdout = tail(result.stdout, outputBytes);
+  const stderr = tail(result.stderr, Math.max(1000, outputBytes - Buffer.byteLength(stdout.text)));
+  if (stdout.omitted || stderr.omitted || result.previouslyReturnedBytes)
+    out.push(`(earlier output not shown; full output in ${result.logDir ?? "the logs"})`);
+  if (stdout.text) out.push(stdout.text.replace(/\n$/, ""));
+  if (stderr.text) out.push(`--- stderr ---`, stderr.text.replace(/\n$/, ""));
   const reports = result.reports ?? [];
-  if (reports.length || result.droppedReports) {
-    process.stdout.write(`--- reports (${reports.length}) ---\n`);
-    for (const message of reports) process.stdout.write(`${report(message)}\n`);
-    if (result.droppedReports)
-      process.stdout.write(`(${result.droppedReports} older reports dropped: queue full)\n`);
-  } else if (result.status === "events") process.stdout.write("no new reports\n");
+  if (reports.length) {
+    out.push(`--- reports (${reports.length}) ---`);
+    for (const message of reports) out.push(report(message));
+  } else if (result.status === "events") out.push("no new reports");
+  if (result.moreReports)
+    out.push(`(${result.moreReports} more reports queued; \`mf events\` shows them)`);
+  const dropped = result.droppedReports;
+  if (dropped?.overflow) out.push(`(${dropped.overflow} older reports dropped: queue full)`);
+  if (dropped?.expired) out.push(`(${dropped.expired} reports expired before they were shown)`);
+  process.stdout.write(`${out.join("\n")}\n`);
 }
 
 async function start() {
@@ -231,7 +281,10 @@ process.stdout.on("error", (error) => {
   throw error;
 });
 
-main().catch((error) => {
+main().then(
+  // Every result has been printed by now: confirm it, then let go.
+  () => pendingAck(),
+).catch((error) => {
   process.stderr.write(`mf: ${error.message}\n`);
   process.exitCode = 1;
 });
