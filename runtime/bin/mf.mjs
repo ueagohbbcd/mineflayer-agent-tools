@@ -6,7 +6,8 @@
  *   mf stop                      stop them
  *   mf run [options] FILE [ARGS] run a module until it ends: its output
  *                                appears as it is printed, then how it ended
- *   mf inbox                     the reports queued since your last result
+ *   mf inbox [--again]           the reports and changes since you last read
+ *                                it (--again: show that last batch again)
  *   mf status                    characters, programs, idle
  *   mf cancel TASK_ID            stop a program (ending `mf run` does not)
  *   mf idle on|off [--bot NAME]  turn the behaviour between programs on or off
@@ -14,14 +15,14 @@
  *
  * Options for run:
  *   --bot NAME      which character (default: the first)
- *   --inbox         when you wait in the foreground: add `mf inbox` at the end
  *   --read-only     a helper that does not replace the controlling program
  *                   (same as `export const control = false` in the module)
  *   --keep          a read-only helper that keeps running and restarts with
  *                   its character; mf returns once it has started
  *
  * `mf run` waits until the program ends. To do other things meanwhile, run it
- * in your tool's background shell and read `mf inbox` in the foreground.
+ * in your tool's background shell and read `mf inbox` in the foreground. For a
+ * short program and the latest reports in one call: `mf run x.mjs; mf inbox`.
  *
  * State lives in MF_STATE_DIR (default ./.mf, so run mf from the directory
  * where you started it). `mf start` needs MF_USERNAME (or MF_USERNAMES) and
@@ -108,7 +109,7 @@ function parse(argv) {
     }
     else if (arg === "--read-only") options.readOnly = true;
     else if (arg === "--keep") options.keep = true;
-    else if (arg === "--inbox") options.inbox = true;
+    else if (arg === "--again") options.again = true;
     else rest.push(arg);
   }
   return { options, rest };
@@ -166,6 +167,7 @@ function print(result) {
   }
   const out = [];
   if (result.status !== "inbox") out.push(header(result));
+  if (result.again) out.push("(shown before; repeated with --again)");
   for (const change of result.changes ?? [])
     out.push(`! changed: ${change.reason} (${change.character}, ${new Date(change.at).toISOString().slice(11, 19)})`);
   const reports = result.reports ?? [];
@@ -264,7 +266,7 @@ async function main() {
       if (!rest[0]) throw new Error("usage: mf cancel TASK_ID");
       return print(await request({ type: "cancel", taskId: rest[0] }));
     case "inbox":
-      return print(await request({ type: "inbox" }));
+      return print(await request({ type: "inbox", ...options }));
     case "idle":
     {
       // Options may also come after on|off here.
@@ -286,7 +288,7 @@ async function main() {
     }
     default:
       process.stderr.write(
-        "usage: mf start | stop | run [--bot NAME] [--inbox] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
+        "usage: mf start | stop | run [--bot NAME] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
       );
       process.exitCode = 2;
   }

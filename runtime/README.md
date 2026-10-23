@@ -34,8 +34,8 @@ none).
 | Command | What it does |
 | --- | --- |
 | `mf start` / `mf stop` | Start or stop the supervisor and the character(s) |
-| `mf run [--bot NAME] [--inbox] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
-| `mf inbox` | The reports and changes since your last result, at once |
+| `mf run [--bot NAME] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
+| `mf inbox [--again]` | The reports and changes since you last read it, at once (`--again` shows that batch again) |
 | `mf status` | Characters, programs, idle, and what programs set with `setStatus` (JSON) |
 | `mf cancel TASK_ID` | Stop a program |
 | `mf idle on\|off [--bot NAME]` | Turn the behaviour between programs on or off |
@@ -48,13 +48,15 @@ none).
   when it ends, and the background job's output has the program's own lines
   and how it ended.
 - **Look at the game in the foreground.** `mf inbox` returns at once with
-  what was reported since your last result: damage, chat, deaths, what the
-  observer saw. Read it before deciding something that depends on the game.
+  what was reported since you last read it: damage, chat, deaths, what the
+  observer saw. It is the only command that takes reports out of the queue.
+  Read it before deciding something that depends on the game; it can go
+  beside a background `mf run` in the same batch of tool calls.
 - **Short programs in the foreground.** A look around, one placement, a
-  query: `mf run --inbox` waits for them and returns the result followed by
-  the inbox, in one call. Use `--inbox` only when you wait for the result
-  yourself: in a background job's output the reports would sit unread, and
-  `mf inbox` would no longer show them.
+  query: `mf run look.mjs; mf inbox` in one shell command runs the program
+  and then reads the inbox, so the reports are as new as the result. (Two
+  separate tool calls in one batch may run at the same time, so the inbox
+  would be read before the program ends.)
 - **Ending `mf run` is not cancelling.** If the shell command is stopped or
   moved to the background, the program keeps running; its end then shows up
   in `mf inbox` as `task.completed`. Use `mf cancel TASK_ID` to stop it.
@@ -62,9 +64,10 @@ none).
   directory has the program's whole output.
 
 Something written to a background job's output has not been seen until you
-read it, and a harness may drop or delay its notification. That is why the
-reports stay in the inbox until you ask for them; `mf inbox` is the way to
-know where things stand.
+read it, and a harness may drop or delay its notification. That is why
+`mf run` never takes reports: they stay in the inbox until you ask for them.
+If an `mf inbox` output was lost or cut, `mf inbox --again` shows the last
+batch again.
 
 ## Results
 
@@ -77,9 +80,8 @@ ended:
 | `interrupted` | The module was stopped: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. | 130 |
 | `not_started` | Something changed for this character that you have not read yet. The module was not run. | 75 |
 
-With `--inbox`, the changes and reports since your last result follow, the
-same as `mf inbox` would show. A `not_started` result always shows the
-changes that stopped it.
+`not_started` names the character and what changed, and tells you to read
+`mf inbox`; the details are there.
 
 **Changes** stop the character's program and keep the next one from starting
 (lines starting with `! changed:`): the character died, moved to another
@@ -89,12 +91,11 @@ character's process directly, so they hold whatever default scripts run. A
 program or an adapter can add its own with `major: "reason"` in a report's
 data.
 
-A change stays in force until a result shows it to you: `mf inbox`,
-`mf run --inbox`, `mf cancel`, or a `not_started` result. So after a death
-you have not read about, the next `mf run` comes back `not_started` with the
-change, and the one after that runs.
+A change stays in force until `mf inbox` has shown it. So after a death you
+have not read about, `mf run` comes back `not_started` until you read the
+inbox; then it runs.
 
-`mf inbox` (and `--inbox`) shows the reports that fit in 16000 bytes
+`mf inbox` shows the reports that fit in 16000 bytes
 (`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next call. A
 report counts as given once `mf` has printed it: if `mf` is killed before, it
 comes again. Keep the budget below what your harness shows of one command.

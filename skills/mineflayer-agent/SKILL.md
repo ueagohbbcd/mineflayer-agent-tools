@@ -41,17 +41,17 @@ This package ships that long-running process. From your working directory:
 ```sh
 export MF_USERNAME=Steve MF_HOST=localhost
 npx mf start                  # connects the character and keeps it alive
-npx mf run --inbox look.mjs   # short program: waits for it, prints its result, then the latest reports
-npx mf run walk.mjs 100 -40   # long program: start it with your tool's background shell
-npx mf inbox                  # what happened in the game since your last result, at once
+npx mf run look.mjs; npx mf inbox  # short program, then the latest reports, in one command
+npx mf run walk.mjs 100 -40        # long program: start it with your tool's background shell
+npx mf inbox                       # what happened in the game since you last read it, at once
 npx mf cancel <taskId>        # stop a program (stopping the shell command does not)
 ```
 
 A module is `export default async function (bot, { signal, args, log }) { ... }`: the real bot, an abort signal, its arguments. The function ending is the program ending.
 
-- **Keep working while the character acts.** Run long programs (without `--inbox`) in the background of your own tool; your harness tells you when they end. Meanwhile read `mf inbox` whenever you want to know what is going on in the game.
+- **Keep working while the character acts.** Run long programs in the background of your own tool; your harness tells you when they end. `mf run` only prints the program's output and result; read `mf inbox` whenever you want to know what is going on in the game. It can go beside a background run in the same batch of calls.
 - **One controlling program per character.** A new `mf run` replaces the running one. Modules with `export const control = false` only read and run beside it. Do not put two controlling runs for the same character in one batch of parallel calls.
-- **Changes stop programs.** A death, a dimension change or a crashed process interrupts the character's program, and the next `mf run` comes back `not_started` with `! changed:` lines unless you have read them already (in `mf inbox`).
+- **Changes stop programs.** A death, a dimension change or a crashed process interrupts the character's program, and `mf run` comes back `not_started` until you have read the change in `mf inbox`.
 - **When a program ends, the character stops walking and fighting**, so wait for a walk inside the program. Between your programs it defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that, or `mf idle off`.
 
 Details: [runtime/README.md](../../runtime/README.md).

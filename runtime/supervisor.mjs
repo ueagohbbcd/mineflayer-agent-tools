@@ -413,15 +413,13 @@ export async function startSupervisor({
   /**
    * The result plus what it can carry: every undelivered change and as many
    * reports as fit in the budget. `commit` marks exactly those reports as
-   * given, and clears the changes it showed. `mf run` uses it only when the
-   * caller waits in the foreground and asks for it (`--inbox`); otherwise a
-   * background program's end would mark reports given while they sit unread
-   * in the job's output. A refused start shows the changes (reports: false).
+   * given, and clears the changes it showed. Only `mf inbox` delivers:
+   * `mf run` may end in a background job's output that the model reads
+   * later or never, so it carries only its own result.
    */
-  function deliver(result, { reports = true } = {}) {
-    const batch = reports
-      ? inbox.select({ maxBytes: reportBytes })
-      : { ids: [], messages: [], remaining: 0, dropped: { overflow: 0, expired: 0 } };
+  let lastBatch = null;
+  function deliver(result) {
+    const batch = inbox.select({ maxBytes: reportBytes });
     const changes = [...chars.values()].flatMap((c) => c.changes);
     const upTo = new Map([...chars.values()].map((c) => [c, c.seq]));
     const generationOf = (bot) => chars.get(bot)?.host.generation;
@@ -458,6 +456,13 @@ export async function startSupervisor({
     };
     const commit = () => {
       inbox.commit(batch);
+      // Kept for `mf inbox --again`, for output the caller lost.
+      if (response.reports.length || response.changes)
+        lastBatch = {
+          status: "inbox",
+          ...(response.changes ? { changes: response.changes } : {}),
+          reports: response.reports,
+        };
       // Only the changes this result showed; later ones still block starts.
       for (const [c, seq] of upTo) c.changes = c.changes.filter((change) => change.seq > seq);
       tasks.resumeWaits();
@@ -493,10 +498,12 @@ export async function startSupervisor({
     }
   }
 
+  // A refused start says why; the details, and clearing the refusal, are
+  // `mf inbox`'s.
   const notStarted = (c) => ({
     status: "not_started",
     character: c.name,
-    reason: `${[...new Set(c.changes.map((change) => change.reason))].join(", ")} since your last result; the program was not started`,
+    reason: `${c.name}: ${[...new Set(c.changes.map((change) => change.reason))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
   });
 
   async function run(request, signal, stream) {
@@ -719,10 +726,7 @@ export async function startSupervisor({
   async function handle(request, signal, stream) {
     switch (request.type) {
       case "run": {
-        const result = await run(request, signal, stream);
-        if (request.inbox) return deliver(result);
-        if (result.status === "not_started") return deliver(result, { reports: false });
-        return { response: result };
+        return { response: await run(request, signal, stream) };
       }
       case "cancel": {
         if (typeof request.taskId !== "string") throw new Error("cancel needs a taskId");
@@ -738,17 +742,19 @@ export async function startSupervisor({
           cancelTask(request.taskId);
           await completion(request.taskId);
         }
-        return deliver({
-          status: task.interruptReason ? "interrupted" : "completed",
-          ...(task.interruptReason ? { reason: task.interruptReason } : {}),
-          taskId: task.id,
-          label: task.label,
-          exitCode: task.exitCode,
-          signal: task.signal,
-          startedAt: task.startedAt,
-          completedAt: task.completedAt,
-          ...(task.logDir ? { logDir: task.logDir } : {}),
-        });
+        return {
+          response: {
+            status: task.interruptReason ? "interrupted" : "completed",
+            ...(task.interruptReason ? { reason: task.interruptReason } : {}),
+            taskId: task.id,
+            label: task.label,
+            exitCode: task.exitCode,
+            signal: task.signal,
+            startedAt: task.startedAt,
+            completedAt: task.completedAt,
+            ...(task.logDir ? { logDir: task.logDir } : {}),
+          },
+        };
       }
       case "idle": {
         const targets = request.bot ? [charOf(request.bot)] : [...chars.values()];
@@ -767,6 +773,8 @@ export async function startSupervisor({
         };
       }
       case "inbox":
+        if (request.again)
+          return { response: lastBatch ? { ...lastBatch, again: true } : { status: "inbox", reports: [] } };
         return deliver({ status: "inbox" });
       case "status":
         return { response: status() };
