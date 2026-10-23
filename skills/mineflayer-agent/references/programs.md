@@ -34,7 +34,11 @@ Plugins stay loaded for the life of the bot.
 Give long programs an `AbortSignal` (or a deadline) and undo what they started:
 
 ```js
-export default async function walkTo(bot, { signal, x, y, z }) {
+import pathfinderPkg from "mineflayer-pathfinder";
+const { goals } = pathfinderPkg;
+
+export default async function walkTo(bot, { signal, args }) {
+  const [x, y, z] = args.map(Number);
   const stop = () => bot.pathfinder.setGoal(null);
   signal.addEventListener("abort", stop, { once: true });
   try {
@@ -48,6 +52,8 @@ export default async function walkTo(bot, { signal, x, y, z }) {
 ```
 
 Remove every listener and timer a program adds (`bot.off`, `clearInterval`) before it returns; leftovers keep firing into the next program.
+
+Under `mf`, the second argument carries the `signal`, which aborts on `mf cancel`, when another program replaces this one, or when the character dies. A program that does not stop within a few seconds gets the character's process restarted, so stop promptly. `mf` also removes listeners on `bot` and timers when the program ends, and stops Pathfinder and PvP; listeners on other objects are still yours.
 
 ## Sharing one bot
 

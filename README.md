@@ -1,7 +1,8 @@
 # Mineflayer Agent Tools
 
 Reusable Mineflayer agent utilities: on-demand perception queries, optional
-historical chunk memory, visual inspection, and generic watchdogs.
+historical chunk memory, visual inspection, generic watchdogs, and `mf`, a
+shell runtime that lets an agent run programs on a real, always-connected bot.
 
 Repository: `ueagohbbcd/mineflayer-agent-tools` (formerly
 `mineflayer-world-memory`; GitHub redirects the old address). The package and
@@ -25,7 +26,11 @@ See [project scope](docs/project-scope.md).
 
 To let an agent play Minecraft through Mineflayer, give it the
 [`mineflayer-agent` skill](skills/mineflayer-agent/SKILL.md): setup, how to write
-control programs, and guides for moving, looking, items and survival.
+control programs, and guides for moving, looking, items and survival. It runs
+programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
+`mf run program.mjs` runs a program on the character (in the background of
+your own tool for long ones) and `mf inbox` reads what happened in the game.
+Node 22 or newer.
 
 ## Optional historical world memory
 
@@ -115,20 +120,7 @@ Live bot installation, consumer dependency upgrades and deployment are separate 
 
 `watchdog(bot, { report })` (from `watchdog.js` / `watchdog.mjs`) reports a bot that is stuck, a program that keeps retrying the same thing, and a program blocked by a synchronous loop. It only reads Mineflayer state. See [watchdog](docs/watchdog.md).
 
-## Tests
-
-```sh
-npm test
-python3 -m pip install -r renderers/requirements.txt  # explicit optional install
-npm run test:visual
-node benchmark/terrain.js
-```
-
-Verification uses synthetic worlds/assets; live-server behavior remains untested. Blender
-rendering is a separate optional smoke test described in the visual guide. Core
-Node installation has no Python, Blender, browser or GPU requirement.
-
-### On-demand perception helpers
+## On-demand perception helpers
 
 Use [live CPU views](docs/live-visual.md) for bounded surface/local snapshots,
 bare PNGs, real top-face textures and explicit unknown/history metadata from an
@@ -171,3 +163,16 @@ exposed blocks only; `block()` and `chunk()` include all received blocks, even
 sealed blocks. `ready`, exact reads and metadata reads do not request analysis.
 `chunk()` returns the underlying native object for existing compatibility;
 services should serialize it or wrap getters rather than expose mutation.
+
+## Tests
+
+```sh
+npm test
+python3 -m pip install -r renderers/requirements.txt  # explicit optional install
+npm run test:visual
+node benchmark/terrain.js
+```
+
+Verification uses synthetic worlds/assets; live-server behavior remains untested. Blender
+rendering is a separate optional smoke test described in the visual guide. Core
+Node installation has no Python, Blender, browser or GPU requirement.

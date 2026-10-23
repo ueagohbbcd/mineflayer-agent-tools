@@ -1,7 +1,7 @@
 {
   "name": "mineflayer-world-memory",
   "version": "0.1.0",
-  "description": "Optional chunk history, perception queries, visuals, and watchdogs for Mineflayer agents",
+  "description": "Mineflayer agent toolkit: chunk history, perception queries, visuals, watchdogs, and a shell runtime (mf) for driving characters step by step",
   "main": "index.js",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,7 @@
     "url": "https://github.com/ueagohbbcd/mineflayer-agent-tools/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "test": "node --test",
@@ -27,10 +27,14 @@
   },
   "peerDependencies": {
     "mineflayer": ">=4.39.0 <5",
-    "prismarine-viewer": "^1.33.0"
+    "prismarine-viewer": "^1.33.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-item": "^1.17.0",
+    "minecraft-data": "^3.114.0"
   },
   "bin": {
-    "world-memory": "bin/world-memory.js"
+    "world-memory": "bin/world-memory.js",
+    "mf": "runtime/bin/mf.mjs"
   },
   "files": [
     "index.js",
@@ -50,10 +54,13 @@
     "queries.js",
     "queries.mjs",
     "watchdog.js",
-    "watchdog.mjs"
+    "watchdog.mjs",
+    "runtime/**/*.mjs",
+    "runtime/README.md"
   ],
   "devDependencies": {
-    "mineflayer": "4.39.0"
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5"
   },
   "peerDependenciesMeta": {
     "prismarine-viewer": {
