@@ -35,7 +35,7 @@ none).
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `mf start` / `mf stop`                                               | Start or stop the supervisor and the character(s)                                          |
 | `mf run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed                            |
-| `mf inbox [--again]`                                                 | The reports and stops since you last read it, at once (`--again` shows that batch again)   |
+| `mf inbox [--again] [--full]`                                        | The reports and stops since you last read it, at once (`--again` shows that batch again; `--full`: the observer sends its whole state instead of what changed) |
 | `mf status`                                                          | Characters, programs, idle, and what programs set with `setStatus` (JSON)                  |
 | `mf cancel TASK_ID`                                                  | Stop a program                                                                             |
 | `mf idle on\|off [--bot NAME]`                                       | Turn the behaviour between programs on or off                                              |
@@ -61,6 +61,12 @@ none).
   to the background, so `mf` leaves the inbox for you to read with
   `mf inbox`. (Two separate tool calls in one batch may run at the same
   time, so an `mf inbox` beside the run would be read before it ends.)
+- **Urgent reports come back early.** While `mf run` waits, an urgent
+  report (critical health, chat that names you with `MF_CHAT_WAKE`, a
+  program's `requestJudgment`, a repeated death) makes it return at once,
+  as `running`; an urgent report already unread when you run returns
+  right after the start. The program keeps running. With `--inbox S` the
+  inbox follows, as for any result within S seconds.
 - **Ending `mf run` is not cancelling.** If the shell command is stopped or
   moved to the background, the program keeps running; its end then shows up
   in `mf inbox` as `task.completed`. Use `mf cancel TASK_ID` to stop it.
@@ -85,23 +91,30 @@ ended:
 | `completed`   | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr).                         | 0 or 1    |
 | `interrupted` | The module was stopped: a stop for its character (below), a new program replaced it, or you ran `mf cancel`.            | 130       |
 | `not_started` | A stop for this character that you have not read yet. The module was not run.                                           | 75        |
+| `running`     | Returned early: an urgent report is unread. The module keeps running; its end comes as a `task.completed` report.        | 0         |
 
 `not_started` names the character and the reason, and tells you to read
 `mf inbox`; the details are there.
 
-A **stop** ends the character's program and keeps the next one from
-starting until you have read it, so that you decide again: the character
-died, moved to another dimension, the session state changed, it
-disconnected, its process crashed or stopped answering, or a watchdog found
-a blocked loop. Stops come from the
-character's process directly, so they hold whatever default scripts run. A
-program or an adapter can add its own with `stop: "reason"` in a report's
-data.
+A **stop** is a report with `stop: "reason"` in its data. It ends the
+character's program and keeps the next one from starting until you have
+read it, so that you decide again. The supervisor posts one when the
+character dies, moves to another dimension, the session state changes, it
+disconnects, or its process crashes or stops answering; the program
+watchdog posts one for a blocked loop. These come from the character's
+process directly, so they hold whatever default scripts run. A program or an
+adapter can post its own the same way.
 
-`mf inbox` lists stops first, as `! stop: REASON (CHARACTER)` lines. A stop
-stays in force until `mf inbox` has shown it: after a death you have not read
-about, `mf run` comes back `not_started` until you read the inbox; then it
-runs.
+`mf inbox` lists stops first, as `! stop: REASON, TYPE (…)` lines, and
+always shows all of them, whatever the size budget; they are never dropped
+or expired. A stop stays in force until `mf inbox` has shown it: after a
+death you have not read about, `mf run` comes back `not_started` until you
+read the inbox (or ran with `--inbox S`, which reads it right after); then
+it runs.
+
+Every other `mf` result ends with a line such as
+`(unread in \`mf inbox\`: 3 reports, 1 urgent, stop: death)` while reports
+wait.
 
 `mf inbox` shows the reports that fit in 16000 bytes
 (`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next call. A
@@ -115,6 +128,8 @@ first stops the current one and waits until it has let go of the bot, then
 starts the new one. A read-only module, marked with
 `export const control = false` in the module or `--read-only` on the command
 line, runs beside the controller and never stops the character's movement.
+(The character's process imports the module to see what it exports, and the
+run uses that import.)
 `--keep` starts a read-only module that keeps running and restarts with its
 character (like the default scripts); `mf` returns once it has started.
 
@@ -163,7 +178,8 @@ const dog = watchdog(bot); // stuck and repeat: reports; a blocked loop: interru
 
 Programs report with `InboxClient` (`runtime/inbox/index.mjs`): `post(data)`,
 `upsert(key, data)` (a replaceable state), `setStatus(key, data)` (shown by
-`mf status`), `requestJudgment(data)` (urgent: listed first). See
+`mf status`), `requestJudgment(data)` (urgent: listed first, and a waiting
+`mf run` returns early). See
 [inbox/README.md](inbox/README.md).
 
 ## Default modules

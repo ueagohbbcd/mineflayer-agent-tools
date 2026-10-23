@@ -257,6 +257,27 @@ export function startNearbyScan({
   }
   let reportLost = false,
     postedStatus;
+  // What the last report the model read contained, per dimension: the block
+  // types and the sampled box. Anything beyond it is news.
+  let seen = null;
+  const extentOf = (value) =>
+    new Map(
+      value.sampledRanges.map(({ dimension, bounds }) => [dimension, bounds]),
+    );
+  function hasNews(value) {
+    if (!seen) return true;
+    for (const entry of value.entries)
+      if (!seen.types.has(JSON.stringify([entry.dimension, entry.name])))
+        return true;
+    for (const [dimension, bounds] of extentOf(value)) {
+      const old = seen.extent.get(dimension);
+      if (!old) return true;
+      for (const axis of ["x", "y", "z"])
+        if (bounds.min[axis] < old.min[axis] || bounds.max[axis] > old.max[axis])
+          return true;
+    }
+    return false;
+  }
   function publishPending() {
     if (!settings.enabled || closed) return;
     const value = snapshot();
@@ -265,11 +286,19 @@ export function startNearbyScan({
     postedStatus = samplingStatus;
     try {
       const accepted = postReport(projectRecentBlocks(value, now()), {
-        minDeliveryDelayMs: settings.minReportMs,
+        // New block types or new ground can be read at once; more of the
+        // same waits for the minimum interval.
+        minDeliveryDelayMs: hasNews(value) ? 0 : settings.minReportMs,
         onLost() {
           reportLost = true;
         },
         onDelivered() {
+          seen = {
+            types: new Set(
+              value.entries.map((entry) => JSON.stringify([entry.dimension, entry.name])),
+            ),
+            extent: extentOf(value),
+          };
           accumulator.retireThrough(value.throughSample);
           // Samples after this queued watermark belong to a fresh pending interval.
           publishPending();

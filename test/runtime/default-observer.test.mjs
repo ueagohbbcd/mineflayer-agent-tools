@@ -190,10 +190,11 @@ test("late receipts cannot erase a newer report with the same state", async (t) 
   assert.equal(sends.length, 3, "late delivery does not regress the baseline");
 });
 
-test("a delivered correction commits the sample after an older report was delivered", async (t) => {
+test("a report taken back that reached the model anyway still sets the baseline", async (t) => {
   const bot = fakeBot();
   const sends = [];
   const receipts = [];
+  const retracted = [];
   const observer = await observe(
     t,
     bot,
@@ -208,6 +209,10 @@ test("a delivered correction commits the sample after an older report was delive
         delivery(id) {
           return new Promise((resolve) => (receipts[id] = resolve));
         },
+        async retract(id) {
+          retracted.push(id);
+          return { id, retracted: false };
+        },
       },
     },
   );
@@ -217,24 +222,20 @@ test("a delivered correction commits the sample after an older report was delive
   bot.health = 12;
   observer.publish();
   await until(() => receipts[2]);
+  // Back to what the model saw: the report is taken back, nothing is sent.
   bot.health = 20;
   observer.publish();
-  await until(() => receipts[3]);
+  assert.deepEqual(retracted, [2]);
+  assert.equal(sends.length, 2);
+  // It had reached the model first: the model now believes 12.
   receipts[2]({ outcome: "delivered" });
   await delay(0);
-  receipts[3]({ outcome: "delivered" });
-  await delay(0);
-  bot.health = 12;
   observer.publish();
-  await until(() => receipts[4]);
+  await until(() => receipts[3]);
   assert.deepEqual(
     sends.map((message) => message.data.changes.self.health),
-    [20, 12, 20, 12],
+    [20, 12, 20],
   );
-  receipts[4]({ outcome: "delivered" });
-  await delay(0);
-  observer.publish();
-  assert.equal(sends.length, 4);
 });
 
 test("default observer reports state changes only after the previous report was delivered", async (t) => {
@@ -259,12 +260,11 @@ test("default observer reports state changes only after the previous report was 
 
   bot.health = 12;
   await until(() => report(inbox));
-  // A section that changes and then changes back before delivery is
-  // corrected in place instead of describing a state that no longer holds.
-  bot.health = 20;
-  await until(() => report(inbox)?.changes.self.health === 20);
   assert.equal(inbox.items.length, 1, "one replaceable report");
-  inbox.drain();
+  // A section that changes and then changes back before delivery is taken
+  // back instead of describing a state that no longer holds.
+  bot.health = 20;
+  await until(() => !report(inbox));
   await delay(40);
   assert.equal(inbox.items.length, 0);
 
@@ -281,19 +281,28 @@ test("default observer reports state changes only after the previous report was 
   assert.equal(bot.listenerCount("end"), 0);
 });
 
-test("observer events are urgent", async (t) => {
+test("observer events share one report, urgent while it holds an urgent one", async (t) => {
   const inbox = new Inbox({ sessionId: "observer-urgent" });
   const bot = fakeBot();
   await observe(t, bot, inbox);
   await until(() => report(inbox));
   inbox.drain();
 
+  const events = () =>
+    inbox.items.find((item) => item.message.key === "observation.events")?.message;
   bot.health = 9;
   bot.emit("damage");
-  await until(() => inbox.items.some((item) => item.message.kind === "event"));
-  const event = inbox.drain().messages.find((m) => m.kind === "event");
-  assert.equal(event.priority, "urgent");
-  assert.equal(event.data.health, 9);
+  bot.health = 7;
+  bot.emit("damage");
+  await until(() => events()?.data.events.length === 2);
+  assert.equal(events().priority, "urgent");
+  assert.deepEqual(events().data.events.map((event) => event.health), [9, 7]);
+  inbox.drain();
+  await delay(10);
+  bot.health = 5;
+  bot.emit("damage");
+  await until(() => events());
+  assert.deepEqual(events().data.events.map((event) => event.health), [5]);
 });
 
 test("native observer reports bot disconnect and removes its listeners on close", async () => {

@@ -7,6 +7,11 @@ import {
 } from "../../runtime/observation/nearby-scan.mjs";
 import { Inbox } from "../../runtime/inbox/index.mjs";
 
+const signMessages = (batch) =>
+  batch.messages.filter(
+    (message) => message.data.type === "observation.nearby_signs",
+  );
+
 function fixture(options = {}) {
   let time = 1000,
     status = "connected",
@@ -227,15 +232,18 @@ test("compact reports retain type counts and representative coordinates", () => 
   f.runtime.close();
 });
 
-test("inbox keeps one complete interval pending until an eligible boundary drains it", () => {
+test("the first report and new ground can be read at once; more of the same waits", () => {
   const f = fixture({});
+  f.tick();
+  assert.equal(f.inbox.pending, true, "nothing was read before: all of it is new");
+  f.inbox.drain();
+  // The same block type in the same box: one pending report, delayed.
+  f.advance();
   f.tick();
   assert.equal(f.inbox.items.length, 1);
   assert.equal(f.inbox.pending, false);
   f.advance(29000);
-  f.bot.entity.position.x = 2;
   f.tick();
-  assert.equal(f.inbox.items.length, 1);
   assert.equal(f.inbox.pending, false);
   f.advance(1000);
   f.tick();
@@ -245,36 +253,38 @@ test("inbox keeps one complete interval pending until an eligible boundary drain
     3,
     "eligibility does not seal or reset the report",
   );
-  f.advance(30000);
-  f.bot.entity.position.x = 4;
-  f.tick();
-  assert.equal(
-    f.inbox.items.length,
-    1,
-    "another interval worth of wall time still updates the same pending report",
-  );
-  assert.equal(f.inbox.items[0].message.kind, "state");
   const report = f.inbox.drain().messages[0];
-  assert.equal(report.data.samples, 4);
-  assert.equal(report.data.dimensions[0].counts.oak_log, 3);
-  assert.equal(report.data.dimensions[0].opaqueBoundaryArea, 3);
+  assert.equal(report.kind, "state");
+  assert.equal(report.data.samples, 3);
+  assert.equal(report.data.dimensions[0].counts.oak_log, 1);
   assert.equal(f.runtime.snapshot().samples, 0);
+  // Ground beyond the box of the last report read: at once again.
   f.advance();
   f.tick();
   assert.equal(f.inbox.pending, false);
-  f.advance(30000);
+  f.advance();
+  f.bot.entity.position.x = 4;
   f.tick();
-  assert.equal(
-    f.inbox.drain().messages[0].data.dimensions[0].counts.oak_log,
-    1,
-    "same coordinate counts again after actual delivery",
-  );
+  assert.equal(f.inbox.items.length, 1);
+  assert.equal(f.inbox.pending, true);
+  assert.equal(f.inbox.drain().messages[0].data.dimensions[0].counts.oak_log, 2);
+  // A new block type too.
+  f.advance();
+  f.tick();
+  assert.equal(f.inbox.pending, false);
+  f.bot.blockAt = () => ({ name: "stone", transparent: false, shapes: [[0, 0, 0, 1, 1, 1]] });
+  f.advance();
+  f.tick();
+  assert.equal(f.inbox.pending, true);
   f.runtime.close();
 });
 
 test("failed history enqueue never retires samples and delayed acceptance still waits for drain", () => {
   const f = fixture({ minReportMs: 1000 });
+  f.tick();
+  f.inbox.drain(); // The first report is read at once.
   f.acceptReports(false);
+  f.advance();
   f.tick();
   f.advance();
   f.tick();
@@ -378,7 +388,7 @@ test("sign change comparison ignores enumeration order and retries rejected enqu
   f.advance();
   f.tick();
   const attempts = f.signReports.length;
-  assert.equal(f.inbox.drain().messages.length, 1);
+  assert.equal(signMessages(f.inbox.drain()).length, 1);
   f.bot.signs = [two, one];
   f.advance();
   f.tick();
@@ -392,10 +402,6 @@ const signWithText = (text) => ({
   front: { known: true, text },
   back: { known: true, text: "" },
 });
-const signMessages = (batch) =>
-  batch.messages.filter(
-    (message) => message.data.type === "observation.nearby_signs",
-  );
 
 test("expired nearby signs are retried until actual delivery, then unchanged samples stay quiet", () => {
   const f = fixture({});

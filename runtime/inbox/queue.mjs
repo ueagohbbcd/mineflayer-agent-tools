@@ -8,6 +8,9 @@ export class Inbox extends EventEmitter {
     maxItems = 256,
     maxBytes = 262144,
     ttlMs = 300000,
+    // Messages that are never dropped for room or age and that every
+    // selection carries, whatever the budget (the supervisor's stops).
+    keep = () => false,
     now = Date.now,
   } = {}) {
     super();
@@ -19,7 +22,7 @@ export class Inbox extends EventEmitter {
       !(ttlMs > 0)
     )
       throw new Error("Invalid inbox limits");
-    Object.assign(this, { sessionId, maxItems, maxBytes, ttlMs, now });
+    Object.assign(this, { sessionId, maxItems, maxBytes, ttlMs, keep, now });
     this.items = [];
     this.bytes = 0;
     this.dropped = { overflow: 0, expired: 0 };
@@ -30,8 +33,11 @@ export class Inbox extends EventEmitter {
     // How recently queued messages left the queue, for out-of-process receipts.
     this.outcomes = new Map();
     this.maxOutcomes = 4096;
+    // Requests from the reader to the producers (signal()), newest last.
+    this.signals = [];
+    this.signalSeq = 0;
   }
-  /** delivered | replaced | expired | overflow | removed, or pending/unknown. */
+  /** delivered | replaced | retracted | expired | overflow | removed, or pending/unknown. */
   outcome(id) {
     if (this.items.some((item) => item.id === id)) return "pending";
     return this.outcomes.get(id) ?? "unknown";
@@ -103,7 +109,7 @@ export class Inbox extends EventEmitter {
       throw new Error(
         "minDeliveryDelayMs requires a nonnegative integer and delayed normal state",
       );
-    const ttl = input.ttlMs ?? this.ttlMs;
+    let ttl = input.ttlMs ?? this.ttlMs;
     // Infinity keeps a message until it is delivered or pushed out.
     if (typeof ttl !== "number" || !(ttl > 0))
       throw new Error("Invalid message TTL");
@@ -117,21 +123,25 @@ export class Inbox extends EventEmitter {
         : {}),
     };
     // A state replaces the pending one with the same key from the same
-    // source, character and process: one character's observer never replaces
-    // another's, and a restarted one never replaces what the last one saw.
+    // source, task, character and process: one character's observer never
+    // replaces another's, a program never replaces the observer's, and a
+    // restarted one never replaces what the last one saw.
+    const taskId = typeof input.taskId === "string" && input.taskId ? input.taskId : undefined;
     const sameState = (item) =>
       item.message.kind === "state" &&
       item.message.source === source &&
       item.message.key === key &&
+      item.message.taskId === taskId &&
       item.message.bot === origin.bot &&
       item.message.generation === origin.generation;
     const previous =
       kind === "state" ? this.items.find(sameState) : undefined;
-    // Updating a pending state never moves its first eligibility time later.
+    // Updating a pending state never moves its eligibility time later; an
+    // update with a shorter delay moves it earlier.
     const eligibleAt =
       priority === "urgent"
         ? createdAt
-        : (previous?.eligibleAt ?? createdAt + delay);
+        : Math.min(previous?.eligibleAt ?? Infinity, createdAt + delay);
     const message = {
       id: randomUUID(),
       sessionId: this.sessionId,
@@ -151,6 +161,10 @@ export class Inbox extends EventEmitter {
         : {}),
       ...origin,
     };
+    if (kind !== "current" && this.keep(message)) {
+      ttl = Infinity;
+      delete message.expiresAt;
+    }
     const encoded = JSON.stringify(message);
     const bytes = Buffer.byteLength(encoded);
     if (kind === "current") {
@@ -179,10 +193,11 @@ export class Inbox extends EventEmitter {
       for (const old of [...this.items])
         if (sameState(old)) this.remove(old.id, "replaced");
     while (
-      this.items.length >= this.maxItems ||
-      this.bytes + bytes > this.maxBytes
+      this.items.length &&
+      (this.items.length >= this.maxItems || this.bytes + bytes > this.maxBytes)
     ) {
-      this.remove(this.items[0].id, "overflow");
+      const oldest = this.items.find((item) => !this.keep(item.message)) ?? this.items[0];
+      this.remove(oldest.id, "overflow");
       this.drop("overflow");
     }
     this.items.push({
@@ -222,13 +237,20 @@ export class Inbox extends EventEmitter {
       [...this.current.values()].map(({ message }) => message),
     );
   }
+  /**
+   * Take back a message that has not been delivered yet (its producer no
+   * longer stands by it). Neither onDelivered nor onLost runs.
+   */
+  retract(id) {
+    return this.remove(id, "retracted");
+  }
   remove(id, outcome = "removed") {
     const i = this.items.findIndex((x) => x.id === id);
     if (i < 0) return false;
     const [item] = this.items.splice(i, 1);
     this.bytes -= item.bytes;
     this.settle(id, outcome);
-    if (outcome !== "replaced")
+    if (outcome !== "replaced" && outcome !== "retracted")
       try {
         item.onLost?.();
       } catch (error) {
@@ -255,12 +277,15 @@ export class Inbox extends EventEmitter {
     this.prune();
     const now = this.now();
     const eligible = this.items.filter((item) => (item.eligibleAt ?? 0) <= now);
+    const kept = eligible.filter((item) => this.keep(item.message));
+    const rest = eligible.filter((item) => !this.keep(item.message));
     const ordered = [
-      ...eligible.filter((item) => item.message.priority === "urgent"),
-      ...eligible.filter((item) => item.message.priority !== "urgent"),
+      ...rest.filter((item) => item.message.priority === "urgent"),
+      ...rest.filter((item) => item.message.priority !== "urgent"),
     ];
-    const items = [];
-    let bytes = 0;
+    // Kept messages come first and always; the budget is for the rest.
+    const items = [...kept];
+    let bytes = kept.reduce((sum, item) => sum + item.bytes, 0);
     for (const item of ordered) {
       if (items.length && bytes + item.bytes > maxBytes) break;
       items.push(item);
@@ -271,8 +296,39 @@ export class Inbox extends EventEmitter {
       ids: items.map((item) => item.id),
       messages: items.map((item) => item.message),
       remaining: eligible.length - items.length,
+      // Delayed states not shown yet, by key.
+      accumulating: this.items
+        .filter((item) => (item.eligibleAt ?? 0) > now)
+        .map((item) => item.message.key),
       dropped: { ...this.dropped },
     };
+  }
+  /**
+   * Ask the producers for something (type "full": send your whole state
+   * again, not a difference). Producers read signals with
+   * InboxClient.signals(); returns the signal's sequence number.
+   */
+  signal(type) {
+    const entry = { seq: ++this.signalSeq, type, at: this.now() };
+    this.signals.push(entry);
+    if (this.signals.length > 32) this.signals.shift();
+    this.emit("signal", entry);
+    return entry.seq;
+  }
+  /** Signals after `after`; waits up to timeoutMs for one when there are none. */
+  signalsAfter(after, timeoutMs = 0) {
+    const newer = () => this.signals.filter((entry) => entry.seq > after);
+    if (newer().length || timeoutMs <= 0)
+      return Promise.resolve({ signals: newer(), last: this.signalSeq });
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.off("signal", done);
+        resolve({ signals: newer(), last: this.signalSeq });
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.on("signal", done);
+    });
   }
   /** Mark a selected batch delivered; messages replaced meanwhile are skipped. */
   commit({ ids, dropped = { overflow: 0, expired: 0 } }) {
@@ -337,6 +393,8 @@ export function localInboxClient(inbox, { source = "program" } = {}) {
       send({ ...options, kind: "judgment", data, priority: "urgent" }),
     setStatus: (key, data, options = {}) =>
       send({ ...options, kind: "current", key, data }),
+    retract: async (id) => ({ id, retracted: inbox.retract(id) }),
+    signals: (after = 0, { waitMs = 0 } = {}) => inbox.signalsAfter(after, waitMs),
     async delivery(id, { timeoutMs = 30000 } = {}) {
       return { id, outcome: await inbox.waitForOutcome(id, timeoutMs) };
     },

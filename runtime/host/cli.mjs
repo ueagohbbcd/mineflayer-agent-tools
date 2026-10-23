@@ -130,7 +130,13 @@ bot.once("spawn", async () => {
     });
     // Lifecycle events for the supervisor, independent of any default script.
     let dimension = bot.game?.dimension;
-    bot.on("death", () => runner.lifecycle({ event: "death" }));
+    bot.on("death", () => {
+      const p = bot.entity?.position;
+      runner.lifecycle({
+        event: "death",
+        ...(p ? { position: { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, z: Math.round(p.z * 10) / 10 } } : {}),
+      });
+    });
     bot.on("spawn", () => {
       const now = bot.game?.dimension;
       if (now && dimension && now !== dimension)

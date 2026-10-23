@@ -2,10 +2,12 @@
 /**
  * Run a module inside a character's own process, on the native bot:
  *
- *   node runtime/host/run.mjs [--bot NAME] task.mjs [args...]
+ *   node runtime/host/run.mjs [--bot NAME] [--read-only] task.mjs [args...]
  *
  * The supervisor runs it for `mf run`. Output of the module appears here; the
  * exit code is 0 when it finished, 1 when it threw, 130 when it was cancelled.
+ * --read-only runs it as a helper that leaves the character's movement alone
+ * when it ends (as `export const control = false` does).
  * SIGTERM or SIGINT (`mf cancel`) aborts the module; a stubborn module causes
  * its whole host to restart.
  */
@@ -83,6 +85,7 @@ export function runModule({
   id = randomUUID(),
   cancelGraceMs = 1500,
   hostRetry = false,
+  control = true,
 }) {
   return new Promise((done) => {
     const socket = net.connect(
@@ -122,7 +125,7 @@ export function runModule({
     socket.setEncoding("utf8");
     socket.on("connect", () =>
       socket.write(
-        `${JSON.stringify({ type: "run", id, file, args, cwd, env: runEnv(env) })}\n`,
+        `${JSON.stringify({ type: "run", id, file, args, cwd, env: runEnv(env), ...(control ? {} : { control: false }) })}\n`,
       ),
     );
     socket.on("data", (chunk) => {
@@ -209,6 +212,7 @@ if (
 ) {
   const argv = process.argv.slice(2);
   let persistent = false;
+  let control = true;
   let bot;
   while (argv[0]?.startsWith("--")) {
     if (argv[0] === "--bot" && argv[1]) {
@@ -216,6 +220,9 @@ if (
       argv.splice(0, 2);
     } else if (argv[0] === "--persistent") {
       persistent = true;
+      argv.shift();
+    } else if (argv[0] === "--read-only") {
+      control = false;
       argv.shift();
     } else break;
   }
@@ -230,6 +237,7 @@ if (
       socketPath: runSocket(bot),
       file,
       args,
+      control,
     });
   } catch (error) {
     process.stderr.write(`run: ${error.message}\n`);

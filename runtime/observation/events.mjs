@@ -32,6 +32,9 @@ export function watchObservation(
     objectiveItems = [],
     inventoryWatchItems = [],
     inventoryWatchType = "inventory_watch",
+    // Death and disconnect reports; off where something else reports them
+    // (the mf supervisor does, as stops).
+    lifecycleEvents = true,
     onError,
     ...sampleOptions
   } = {},
@@ -445,11 +448,12 @@ export function watchObservation(
     resetDamage();
     checkObjectives();
     dead = true;
-    emit(
-      "death",
-      { position: vector(bot.entity?.position), health: finite(bot.health) },
-      "urgent",
-    );
+    if (lifecycleEvents)
+      emit(
+        "death",
+        { position: vector(bot.entity?.position), health: finite(bot.health) },
+        "urgent",
+      );
   });
   on("spawn", () => {
     const respawn = dead;
@@ -472,11 +476,12 @@ export function watchObservation(
     flushHealth(false);
     resetDamage();
     lifecycle.disconnected = true;
-    emit(
-      "disconnected",
-      { reason: typeof reason === "string" ? reason : plain(reason) },
-      "urgent",
-    );
+    if (lifecycleEvents)
+      emit(
+        "disconnected",
+        { reason: typeof reason === "string" ? reason : plain(reason) },
+        "urgent",
+      );
   };
   on("end", disconnected);
   on("kicked", disconnected);
@@ -502,7 +507,7 @@ export function watchObservation(
       },
       "urgent",
     );
-  if (bot.connectionStatus === "disconnected")
+  if (lifecycleEvents && bot.connectionStatus === "disconnected")
     emit(
       "disconnected",
       { reason: plain(bot.disconnectReason), observedOnAttach: true },

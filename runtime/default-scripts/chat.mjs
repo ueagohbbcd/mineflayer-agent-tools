@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Forwards native Mineflayer chat events through the normal InboxClient.
 import { once } from "node:events";
-import { InboxClient } from "../inbox/index.mjs";
+import { InboxClient, inboxSlot } from "../inbox/index.mjs";
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -23,6 +23,10 @@ export function chatWakes(text, { mode = "none", username } = {}) {
  * system lines such as "Respawn point set" (`messagestr` with position
  * `system`; action-bar `game_info` lines are left out). The bot's own lines
  * are not forwarded. System lines never wake the model.
+ *
+ * All unread lines share one report (`game.chat`, the newest 64 lines),
+ * urgent while it holds a line that wakes; after the model has read it the
+ * next line starts a new one.
  */
 export function startChatForwarder({
   bot,
@@ -32,21 +36,19 @@ export function startChatForwarder({
 }) {
   if (!["none", "mention", "all"].includes(wake))
     throw new Error("MF_CHAT_WAKE must be none, mention or all");
+  const slot = inboxSlot(inbox, "game.chat", {
+    render: (lines, { omitted }) => ({
+      type: "game.chat",
+      source: "minecraft",
+      trusted: false,
+      lines,
+      ...(omitted ? { omittedOlderLines: omitted } : {}),
+    }),
+    onError: () => {},
+  });
+  let seq = 0;
   const post = (channel, sender, text, urgent) =>
-    void inbox
-      .post(
-        {
-          type: "game.chat",
-          source: "minecraft",
-          trusted: false,
-          channel,
-          text,
-          sender,
-          observedAt: Date.now(),
-        },
-        urgent ? { priority: "urgent" } : {},
-      )
-      .catch(() => {});
+    slot.put(++seq, { channel, sender, text, observedAt: Date.now() }, { urgent });
   const onChat = (username, message) => {
     if (username === bot.username) return;
     const text = String(message ?? "");
@@ -67,10 +69,14 @@ export function startChatForwarder({
     : new Promise(() => {});
   return {
     done,
+    /** Wait until the latest line has reached the inbox. */
+    flush: () => slot.flush(),
     async close() {
       bot.off("chat", onChat);
       bot.off("whisper", onWhisper);
       bot.off("messagestr", onMessage);
+      await slot.flush();
+      slot.close();
     },
   };
 }
