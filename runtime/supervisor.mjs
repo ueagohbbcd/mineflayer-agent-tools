@@ -12,18 +12,19 @@
  * - a control socket that bin/mf.mjs talks to.
  *
  * `run` starts a program, streams its output and waits until it ends or is
- * interrupted. `inbox` returns the reports and changes queued since the last
+ * interrupted. `inbox` returns the reports and stops queued since the last
  * read, up to a size budget. See runtime/README.md.
  *
  * Each character has its own controlling program, idle behaviour, takeover
- * lock and list of changes the caller has not been given yet. Those changes
- * (death, a new dimension, a session change, a crashed or blocked process)
- * come from the character's process over an internal channel, not from
- * reports, so they hold with every default script turned off. A program for
- * a character with undelivered changes is not started.
+ * lock and list of stops the caller has not been given yet. A stop (death, a
+ * new dimension, a session change, a crashed or blocked process) ends the
+ * character's program, and no program for that character starts until
+ * `mf inbox` has shown the stop. Stops come from the character's process over
+ * an internal channel, not from reports, so they hold with every default
+ * script turned off.
  *
  * Delivery is a two-step exchange: the result is written, and its reports
- * and changes count as given only after the caller confirms it read the
+ * and stops count as given only after the caller confirms it read the
  * result. A caller that disconnects first leaves them queued for the next
  * result: they may repeat, but are not lost.
  */
@@ -55,9 +56,9 @@ const toolkitRoot = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/,
  * Reports that make the model's current plan stale: the character's program
  * is stopped and the next one waits until the caller has seen the change.
  * The runtime posts its own (source "runtime"); a program or an adapter (an
- * arena's match rules, say) marks one with `major: "reason"` in its data.
+ * arena's match rules, say) marks one with `stop: "reason"` in its data.
  */
-const RUNTIME_MAJOR = {
+const RUNTIME_STOPS = {
   "character.died": "death",
   "character.dimension": "dimension changed",
   "character.session": "session changed",
@@ -65,13 +66,13 @@ const RUNTIME_MAJOR = {
   "host.crashed": "host crashed",
   "host.unresponsive": "character process unresponsive",
 };
-export function majorReason(message) {
+export function stopReason(message) {
   const data = message?.data;
   if (!data || typeof data !== "object") return null;
-  if (message.source === "runtime" && RUNTIME_MAJOR[data.type])
-    return RUNTIME_MAJOR[data.type];
+  if (message.source === "runtime" && RUNTIME_STOPS[data.type])
+    return RUNTIME_STOPS[data.type];
   if (message.kind === "judgment" && data.type === "blocked") return "blocked";
-  if (typeof data.major === "string" && data.major) return data.major.slice(0, 120);
+  if (typeof data.stop === "string" && data.stop) return data.stop.slice(0, 120);
   return null;
 }
 
@@ -217,7 +218,7 @@ export async function startSupervisor({
   const taskBots = new Map();
 
   // Per character: its controlling program and idle, the lock that orders
-  // takeovers, and the changes the caller has not been given yet.
+  // takeovers, and the stops the caller has not been given yet.
   const chars = new Map(
     hosts.bots.map((host) => [
       host.name,
@@ -228,7 +229,7 @@ export async function startSupervisor({
         idle: null,
         lock: Promise.resolve(),
         starting: 0,
-        changes: [],
+        stops: [],
         seq: 0,
         idleTimer: undefined,
         idleCustomFailed: null,
@@ -302,10 +303,10 @@ export async function startSupervisor({
     return chars.has(name) ? [chars.get(name)] : [...chars.values()];
   }
   inbox.on("message", (message) => {
-    const reason = majorReason(message);
+    const reason = stopReason(message);
     if (!reason) return;
     for (const c of charactersOf(message)) {
-      c.changes.push({ seq: ++c.seq, character: c.name, reason, at: message.createdAt });
+      c.stops.push({ seq: ++c.seq, character: c.name, reason });
       const task = c.controller && tasks.tasks.get(c.controller);
       if (task?.status === "running" && !task.interruptReason) {
         task.interruptReason = reason;
@@ -410,21 +411,21 @@ export async function startSupervisor({
   }
 
   /**
-   * The result plus what it can carry: every undelivered change and as many
+   * The result plus what it can carry: every undelivered stop and as many
    * reports as fit in the budget. `commit` marks exactly those reports as
-   * given, and clears the changes it showed. Only `mf inbox` delivers:
+   * given, and clears the stops it showed. Only `mf inbox` delivers:
    * `mf run` may end in a background job's output that the model reads
    * later or never, so it carries only its own result.
    */
   let lastBatch = null;
   function deliver(result) {
     const batch = inbox.select({ maxBytes: reportBytes });
-    const changes = [...chars.values()].flatMap((c) => c.changes);
+    const stops = [...chars.values()].flatMap((c) => c.stops);
     const upTo = new Map([...chars.values()].map((c) => [c, c.seq]));
     const generationOf = (bot) => chars.get(bot)?.host.generation;
     const response = {
       ...result,
-      ...(changes.length ? { changes: changes.map(({ seq: _, ...change }) => change) } : {}),
+      ...(stops.length ? { stops: stops.map(({ character, reason }) => ({ character, reason })) } : {}),
       reports: batch.messages.map(
         ({ id, sessionId: _, expiresAt, eligibleAt, generation, ...message }) => {
           const label = message.taskId && tasks.tasks.get(message.taskId)?.label;
@@ -456,14 +457,14 @@ export async function startSupervisor({
     const commit = () => {
       inbox.commit(batch);
       // Kept for `mf inbox --again`, for output the caller lost.
-      if (response.reports.length || response.changes)
+      if (response.reports.length || response.stops)
         lastBatch = {
           status: "inbox",
-          ...(response.changes ? { changes: response.changes } : {}),
+          ...(response.stops ? { stops: response.stops } : {}),
           reports: response.reports,
         };
-      // Only the changes this result showed; later ones still block starts.
-      for (const [c, seq] of upTo) c.changes = c.changes.filter((change) => change.seq > seq);
+      // Only the stops this result showed; later ones are still to come.
+      for (const [c, seq] of upTo) c.stops = c.stops.filter((stop) => stop.seq > seq);
     };
     return { response, commit };
   }
@@ -498,10 +499,11 @@ export async function startSupervisor({
 
   // A refused start says why; the details, and clearing the refusal, are
   // `mf inbox`'s.
+  const refusing = (c) => c.stops.length > 0;
   const notStarted = (c) => ({
     status: "not_started",
     character: c.name,
-    reason: `${c.name}: ${[...new Set(c.changes.map((change) => change.reason))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
+    reason: `${c.name}: ${[...new Set(c.stops.map((stop) => stop.reason))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
   });
 
   async function run(request, signal, stream) {
@@ -535,7 +537,7 @@ export async function startSupervisor({
       streamTask(id, stream);
       return waitTask(id, { signal });
     }
-    if (c.changes.length) return notStarted(c);
+    if (refusing(c)) return notStarted(c);
     c.starting++;
     let id;
     let refused;
@@ -545,8 +547,8 @@ export async function startSupervisor({
       id = await withLock(c, async () => {
         await takeOver(c);
         await hostReady(request.bot);
-        // A change while the old program stopped or the host restarted.
-        if (c.changes.length) return void (refused = notStarted(c));
+        // A stop while the old program ended or the host restarted.
+        if (refusing(c)) return void (refused = notStarted(c));
         if (signal?.aborted)
           return void (refused = { status: "not_started", reason: "the caller disconnected" });
         const started = start();
@@ -612,8 +614,8 @@ export async function startSupervisor({
         name,
         running: Boolean(pid),
         idle: !chars.get(name).idleOff,
-        ...(chars.get(name).changes.length
-          ? { undeliveredChanges: chars.get(name).changes.map((change) => change.reason) }
+        ...(chars.get(name).stops.length
+          ? { unreadStops: chars.get(name).stops.map((stop) => stop.reason) }
           : {}),
       })),
       tasks: running,
