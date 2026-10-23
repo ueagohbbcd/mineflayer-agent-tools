@@ -51,6 +51,7 @@ A module is `export default async function (bot, { signal, args, log }) { ... }`
 
 - **Keep working while the character acts.** Wait in the foreground only for a program that is short (a look, one action) and whose result you need before doing anything else; run anything that walks, fights, gathers or might take longer in the background of your own tool, so you can check `mf inbox` and correct it while it runs; your harness tells you when they end. `mf run` only prints the program's output and result; read `mf inbox` whenever you want to know what is going on in the game. It can go beside a background run in the same batch of calls. When you wait for a program, estimate how long it needs and pass `--inbox S` with S no longer than your tool's foreground wait (if you do not know that wait, use 20).
 - **One controlling program per character.** A new `mf run` replaces the running one. Modules with `export const control = false` only read and run beside it. Do not put two controlling runs for the same character in one batch of parallel calls.
+- **End a program to hand back a decision.** Nothing in the game interrupts you; a program ending does. When a program hits something you must decide (no path, an unknown mob, food gone), stop and return what you need in its result instead of only reporting it.
 - **Changes stop programs.** A death, a dimension change or a crashed process interrupts the character's program, and `mf run` comes back `not_started` until you have read the change in `mf inbox`.
 - **When a program ends, the character stops walking and fighting**, so wait for a walk inside the program. Between your programs it defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that, or `mf idle off`.
 
@@ -72,7 +73,7 @@ Details: [runtime/README.md](../../runtime/README.md).
 | Remember chunks after they unload | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`. |
 | A picture of the terrain or a structure | `mineflayer-world-memory/live.mjs`: `observationViewBounds`, `surfaceSnapshotFromBot` + `renderTexturedSurface`, `snapshotFromBot` + `renderOblique`, `saveRender` (see `docs/live-visual.md`). Blank means not received, not air. |
 | The logs of one tree before chopping | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`. |
-| Notice a stuck or looping program | Under `mf`: ``(await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`)).watchdog(bot)``, which reports into your results. Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
+| Notice a stuck or looping program | Under `mf`: ``(await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`)).watchdog(bot)``, which reports into `mf inbox`. Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
 | One full sample of your state | `mf snapshot` |
 
 ## Guides
