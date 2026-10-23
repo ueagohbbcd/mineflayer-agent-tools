@@ -15,6 +15,11 @@
  *
  * Options for run:
  *   --bot NAME      which character (default: the first)
+ *   --inbox S       if the program ends within S seconds, read `mf inbox`
+ *                   right after it, in the same output. Set S no longer
+ *                   than your tool waits for a command in the foreground:
+ *                   a later end may sit in a background job's output, so
+ *                   the inbox is left for you to read then.
  *   --read-only     a helper that does not replace the controlling program
  *                   (same as `export const control = false` in the module)
  *   --keep          a read-only helper that keeps running and restarts with
@@ -103,7 +108,11 @@ function parse(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (rest.length) rest.push(arg);
-    else if (arg === "--bot") {
+    else if (arg === "--inbox") {
+      const value = Number(argv[++i]);
+      if (!Number.isFinite(value) || value < 0) throw new Error("--inbox needs seconds");
+      options.inboxWithin = value;
+    } else if (arg === "--bot") {
       options.bot = argv[++i];
       if (!options.bot) throw new Error("--bot needs a character name");
     }
@@ -258,10 +267,25 @@ async function main() {
       return;
     }
     case "run":
+    {
       if (!rest[0]) throw new Error("usage: mf run [options] FILE [ARGS...]");
-      return print(
-        await request({ type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...options }, streamed),
+      const { inboxWithin, ...runOptions } = options;
+      const startedAt = Date.now();
+      print(
+        await request({ type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...runOptions }, streamed),
       );
+      if (inboxWithin === undefined) return;
+      if (Date.now() - startedAt > inboxWithin * 1000) {
+        process.stdout.write(`(ran longer than ${inboxWithin}s: read \`mf inbox\` yourself)\n`);
+        return;
+      }
+      // The run's own connection is done; the inbox is a second request.
+      const exitCode = process.exitCode;
+      pendingAck();
+      print(await request({ type: "inbox" }));
+      process.exitCode = exitCode;
+      return;
+    }
     case "cancel":
       if (!rest[0]) throw new Error("usage: mf cancel TASK_ID");
       return print(await request({ type: "cancel", taskId: rest[0] }));
@@ -288,7 +312,7 @@ async function main() {
     }
     default:
       process.stderr.write(
-        "usage: mf start | stop | run [--bot NAME] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
+        "usage: mf start | stop | run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
       );
       process.exitCode = 2;
   }

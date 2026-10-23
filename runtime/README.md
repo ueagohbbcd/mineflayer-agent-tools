@@ -34,7 +34,7 @@ none).
 | Command | What it does |
 | --- | --- |
 | `mf start` / `mf stop` | Start or stop the supervisor and the character(s) |
-| `mf run [--bot NAME] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
+| `mf run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
 | `mf inbox [--again]` | The reports and changes since you last read it, at once (`--again` shows that batch again) |
 | `mf status` | Characters, programs, idle, and what programs set with `setStatus` (JSON) |
 | `mf cancel TASK_ID` | Stop a program |
@@ -52,11 +52,14 @@ none).
   observer saw. It is the only command that takes reports out of the queue.
   Read it before deciding something that depends on the game; it can go
   beside a background `mf run` in the same batch of tool calls.
-- **Short programs in the foreground.** A look around, one placement, a
-  query: `mf run look.mjs; mf inbox` in one shell command runs the program
-  and then reads the inbox, so the reports are as new as the result. (Two
-  separate tool calls in one batch may run at the same time, so the inbox
-  would be read before the program ends.)
+- **Programs you wait for.** Estimate how long the program needs and pass
+  `--inbox S`, with S no longer than your tool waits for a command in the
+  foreground: `mf run --inbox 60 walk.mjs 100 -40`. If the program ends
+  within S seconds, the inbox follows its result in the same output, as new
+  as the result. If it runs longer, your tool has probably moved the command
+  to the background, so `mf` leaves the inbox for you to read with
+  `mf inbox`. (Two separate tool calls in one batch may run at the same
+  time, so an `mf inbox` beside the run would be read before it ends.)
 - **Ending `mf run` is not cancelling.** If the shell command is stopped or
   moved to the background, the program keeps running; its end then shows up
   in `mf inbox` as `task.completed`. Use `mf cancel TASK_ID` to stop it.
