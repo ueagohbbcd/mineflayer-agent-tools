@@ -11,17 +11,22 @@
  * - the idle behaviour between the model's programs;
  * - a control socket that bin/mf.mjs talks to.
  *
- * `run` starts a program, streams its output and waits until it ends or is
- * interrupted. `inbox` returns the reports and stops queued since the last
- * read, up to a size budget. See runtime/README.md.
+ * `run` starts a program, streams its output and waits until it ends, is
+ * interrupted, or an urgent report arrives (then it returns early and the
+ * program goes on). `inbox` returns the reports queued since the last read,
+ * up to a size budget. See runtime/README.md.
  *
- * Each character has its own controlling program, idle behaviour, takeover
- * lock and list of stops the caller has not been given yet. A stop (death, a
- * new dimension, a session change, a crashed or blocked process) ends the
- * character's program, and no program for that character starts until
- * `mf inbox` has shown the stop. Stops come from the character's process over
- * an internal channel, not from reports, so they hold with every default
- * script turned off.
+ * A stop is a report whose data carries `stop: "reason"`. The supervisor
+ * posts them itself for death, a new dimension, a session change, a
+ * disconnect and a crashed or unresponsive process (from the character's
+ * process over an internal channel, so they hold with every default script
+ * turned off); a program or an adapter may post one too. While a stop is
+ * unread, the character's controlling program is interrupted and no new one
+ * starts; reading it with `mf inbox` is the confirmation. Stops are never
+ * dropped for room or age and every inbox result carries all of them.
+ *
+ * Each character has its own controlling program, idle behaviour and
+ * takeover lock.
  *
  * Delivery is a two-step exchange: the result is written, and its reports
  * and stops count as given only after the caller confirms it read the
@@ -37,7 +42,7 @@ import { Inbox, createInboxServer } from "./inbox/index.mjs";
 import { TaskManager } from "./tasks/index.mjs";
 import { startBotHosts } from "./host/launcher.mjs";
 import { StringDecoder } from "node:string_decoder";
-import { status as hostStatus } from "./host/rpc.mjs";
+import { request as hostRequest, status as hostStatus } from "./host/rpc.mjs";
 import { socketPath } from "./socket-path.mjs";
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url));
@@ -53,27 +58,13 @@ const defaultScriptFiles = {
 const toolkitRoot = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 /**
- * Reports that make the model's current plan stale: the character's program
- * is stopped and the next one waits until the caller has seen the change.
- * The runtime posts its own (source "runtime"); a program or an adapter (an
- * arena's match rules, say) marks one with `stop: "reason"` in its data.
+ * The stop a report carries: `stop: "reason"` in its data. Such a report
+ * makes the model's plan stale: the character's program is stopped and the
+ * next one waits until the caller has read it.
  */
-const RUNTIME_STOPS = {
-  "character.died": "death",
-  "character.dimension": "dimension changed",
-  "character.session": "session changed",
-  "character.disconnected": "disconnected",
-  "host.crashed": "host crashed",
-  "host.unresponsive": "character process unresponsive",
-};
 export function stopReason(message) {
-  const data = message?.data;
-  if (!data || typeof data !== "object") return null;
-  if (message.source === "runtime" && RUNTIME_STOPS[data.type])
-    return RUNTIME_STOPS[data.type];
-  if (message.kind === "judgment" && data.type === "blocked") return "blocked";
-  if (typeof data.stop === "string" && data.stop) return data.stop.slice(0, 120);
-  return null;
+  const stop = message?.data?.stop;
+  return typeof stop === "string" && stop ? stop.slice(0, 120) : null;
 }
 
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -154,7 +145,11 @@ export async function startSupervisor({
   await claimSocket(inboxSocket);
   // Reports wait until the model receives them; only the size limit (or a
   // ttlMs a program sets on its own message) drops them.
-  const inbox = new Inbox({ sessionId, ttlMs: Infinity });
+  const inbox = new Inbox({
+    sessionId,
+    ttlMs: Infinity,
+    keep: (message) => Boolean(stopReason(message)),
+  });
   const inboxServer = await createInboxServer({
     inbox,
     socketPath: inboxSocket,
@@ -194,6 +189,7 @@ export async function startSupervisor({
               type: expected ? "host.restarted" : "host.crashed",
               bot: host.name,
               exit: signal ?? code,
+              ...(expected ? {} : { stop: "host crashed" }),
             },
           },
           { source: "runtime" },
@@ -217,8 +213,8 @@ export async function startSupervisor({
   // The character each task runs on.
   const taskBots = new Map();
 
-  // Per character: its controlling program and idle, the lock that orders
-  // takeovers, and the stops the caller has not been given yet.
+  // Per character: its controlling program and idle, and the lock that
+  // orders takeovers.
   const chars = new Map(
     hosts.bots.map((host) => [
       host.name,
@@ -229,8 +225,6 @@ export async function startSupervisor({
         idle: null,
         lock: Promise.resolve(),
         starting: 0,
-        stops: [],
-        seq: 0,
         idleTimer: undefined,
         idleCustomFailed: null,
         idleOff: !idleEnabled,
@@ -259,17 +253,18 @@ export async function startSupervisor({
       }
     }
   }
-  const moduleCommand = (file, { args = [], bot, persistent } = {}) =>
+  const moduleCommand = (file, { args = [], bot, persistent, readOnly } = {}) =>
     [
       quote(process.execPath),
       quote(runScript),
       ...(persistent ? ["--persistent"] : []),
+      ...(readOnly ? ["--read-only"] : []),
       ...(bot ? ["--bot", quote(bot)] : []),
       quote(file),
       ...args.map(quote),
     ].join(" ");
-  function startTask(file, { bot, args, persistent, ...options }) {
-    const id = tasks.start(moduleCommand(file, { args, bot, persistent }), options);
+  function startTask(file, { bot, args, persistent, readOnly, ...options }) {
+    const id = tasks.start(moduleCommand(file, { args, bot, persistent, readOnly }), options);
     taskBots.set(id, bot ?? mainBot);
     return id;
   }
@@ -298,15 +293,21 @@ export async function startSupervisor({
   }
 
   /** The characters a message is about; none known means all of them. */
+  const nameOf = (message) => message.data?.bot ?? message.bot ?? taskBots.get(message.taskId);
   function charactersOf(message) {
-    const name = message.data?.bot ?? message.bot ?? taskBots.get(message.taskId);
+    const name = nameOf(message);
     return chars.has(name) ? [chars.get(name)] : [...chars.values()];
   }
+  /** Stops about c that the caller has not read yet. */
+  const unreadStops = (c) =>
+    inbox.items
+      .map((item) => item.message)
+      .filter((message) => stopReason(message) && charactersOf(message).includes(c))
+      .map(stopReason);
   inbox.on("message", (message) => {
     const reason = stopReason(message);
     if (!reason) return;
     for (const c of charactersOf(message)) {
-      c.stops.push({ seq: ++c.seq, character: c.name, reason });
       const task = c.controller && tasks.tasks.get(c.controller);
       if (task?.status === "running" && !task.interruptReason) {
         task.interruptReason = reason;
@@ -411,27 +412,25 @@ export async function startSupervisor({
   }
 
   /**
-   * The result plus what it can carry: every undelivered stop and as many
+   * The result plus what it can carry: every unread stop and as many
    * reports as fit in the budget. `commit` marks exactly those reports as
-   * given, and clears the stops it showed. Only `mf inbox` delivers:
-   * `mf run` may end in a background job's output that the model reads
-   * later or never, so it carries only its own result.
+   * given. Only `mf inbox` delivers: `mf run` may end in a background job's
+   * output that the model reads later or never, so it carries only its own
+   * result.
    */
   let lastBatch = null;
   function deliver(result) {
     const batch = inbox.select({ maxBytes: reportBytes });
-    const stops = [...chars.values()].flatMap((c) => c.stops);
-    const upTo = new Map([...chars.values()].map((c) => [c, c.seq]));
     const generationOf = (bot) => chars.get(bot)?.host.generation;
     const response = {
       ...result,
-      ...(stops.length ? { stops: stops.map(({ character, reason }) => ({ character, reason })) } : {}),
       reports: batch.messages.map(
         ({ id, sessionId: _, expiresAt, eligibleAt, generation, ...message }) => {
           const label = message.taskId && tasks.tasks.get(message.taskId)?.label;
           // A program that ended unwatched says why it was stopped.
           const stopped =
             message.data?.type === "task.completed" &&
+            (message.data.exitCode === 130 || message.data.signal) &&
             tasks.tasks.get(message.data.taskId)?.interruptReason;
           // An unwatched program's end carries only the end of its output.
           if (message.data?.type === "task.completed")
@@ -450,6 +449,7 @@ export async function startSupervisor({
         },
       ),
       ...(batch.remaining ? { moreReports: batch.remaining } : {}),
+      ...(batch.accumulating.length ? { accumulating: batch.accumulating } : {}),
       ...(batch.dropped.overflow || batch.dropped.expired
         ? { droppedReports: batch.dropped }
         : {}),
@@ -457,28 +457,65 @@ export async function startSupervisor({
     const commit = () => {
       inbox.commit(batch);
       // Kept for `mf inbox --again`, for output the caller lost.
-      if (response.reports.length || response.stops)
-        lastBatch = {
-          status: "inbox",
-          ...(response.stops ? { stops: response.stops } : {}),
-          reports: response.reports,
-        };
-      // Only the stops this result showed; later ones are still to come.
-      for (const [c, seq] of upTo) c.stops = c.stops.filter((stop) => stop.seq > seq);
+      if (response.reports.length) lastBatch = { status: "inbox", reports: response.reports };
     };
     return { response, commit };
   }
 
+  /** What is waiting in the inbox, for the line under every other result. */
+  function unread() {
+    const now = Date.now();
+    const eligible = inbox.items.filter((item) => (item.eligibleAt ?? 0) <= now);
+    const stops = [...new Set(eligible.map((item) => stopReason(item.message)).filter(Boolean))];
+    return {
+      reports: eligible.length,
+      urgent: eligible.filter((item) => item.message.priority === "urgent").length,
+      ...(stops.length ? { stops } : {}),
+    };
+  }
+
+  /** Ask the producers for their whole state, and give them a moment to send it. */
+  async function full() {
+    inbox.signal("full");
+    const deadline = Date.now() + 2000;
+    let last = Date.now();
+    const seen = () => (last = Date.now());
+    inbox.on("message", seen);
+    // Done once nothing new has come for 300 ms (at least 300 ms, at most 2 s).
+    while (Date.now() < deadline && Date.now() - last < 300)
+      await new Promise((done) => setTimeout(done, 50));
+    inbox.off("message", seen);
+  }
+
   /**
-   * Wait until the program ends (or the caller goes away: the program keeps
-   * running and its end is reported in the inbox). Its output went to the
-   * caller as it was printed, so the result leaves it out.
+   * Wait until the program ends, or the caller goes away, or an urgent report
+   * is unread (then the result says so and the program keeps running; its end
+   * is reported in the inbox). Its output went to the caller as it was
+   * printed, so the result leaves it out.
    */
   async function waitTask(id, { signal }) {
-    const result = await tasks.wait(id, { signal });
+    const early = new AbortController();
+    const urgent = (message) => {
+      // A stop ends the program itself: its result says so.
+      if (!stopReason(message)) early.abort();
+    };
+    const hasUrgent = () =>
+      inbox.items.some((item) => item.message.priority === "urgent" && !stopReason(item.message));
+    inbox.on("urgent", urgent);
+    if (hasUrgent()) early.abort();
+    let result;
+    try {
+      result = await tasks.wait(id, { signal: AbortSignal.any([signal, early.signal].filter(Boolean)) });
+    } finally {
+      inbox.off("urgent", urgent);
+    }
     const { stdout: _, stderr: __, ...rest } = result;
     const task = tasks.tasks.get(id);
-    return task?.interruptReason && result.status === "completed"
+    if (result.status === "running" && early.signal.aborted && !signal?.aborted)
+      return { ...rest, character: taskBots.get(id), reason: "returned early: an urgent report is unread" };
+    // Interrupted only if it ended because it was stopped, not on its own.
+    const stopped = result.exitCode === 130 || result.signal;
+    return task?.interruptReason && result.status === "completed" && stopped
       ? { ...rest, status: "interrupted", reason: task.interruptReason }
       : rest;
   }
@@ -499,12 +536,26 @@ export async function startSupervisor({
 
   // A refused start says why; the details, and clearing the refusal, are
   // `mf inbox`'s.
-  const refusing = (c) => c.stops.length > 0;
+  const refusing = (c) => unreadStops(c).length > 0;
   const notStarted = (c) => ({
     status: "not_started",
     character: c.name,
-    reason: `${c.name}: ${[...new Set(c.stops.map((stop) => stop.reason))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
+    reason: `${c.name}: ${[...new Set(unreadStops(c))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
   });
+
+  /**
+   * Whether a module controls the character: false when it exports
+   * `control = false`. The character's process imports it to see, and keeps
+   * the imported module for the run that follows.
+   */
+  async function controls(file, request) {
+    try {
+      const answer = await hostRequest(socketOf(request.bot), { type: "probe", file });
+      return answer.control !== false;
+    } catch {
+      return true; // It fails to load: the run says why.
+    }
+  }
 
   async function run(request, signal, stream) {
     if (typeof request.file !== "string" || !request.file)
@@ -515,10 +566,11 @@ export async function startSupervisor({
     if (!existsSync(file)) throw new Error(`No such module: ${file}`);
     // A module that declares itself read-only runs beside the controller.
     // A kept module is read-only too, and restarts with its character.
+    await hostReady(request.bot);
     const readOnly =
       request.readOnly === true ||
       request.keep === true ||
-      /^export\s+const\s+control\s*=\s*false\b/m.test(await readFile(file, "utf8"));
+      !(await controls(file, request));
     const start = () =>
       startTask(file, {
         args: request.args ?? [],
@@ -527,9 +579,9 @@ export async function startSupervisor({
         label: basename(file),
         background: readOnly,
         persistent: request.keep === true,
+        readOnly,
       });
     if (readOnly) {
-      await hostReady(request.bot);
       const id = start();
       // A kept module never ends by design: say it started and return.
       if (request.keep)
@@ -614,14 +666,13 @@ export async function startSupervisor({
         name,
         running: Boolean(pid),
         idle: !chars.get(name).idleOff,
-        ...(chars.get(name).stops.length
-          ? { unreadStops: chars.get(name).stops.map((stop) => stop.reason) }
+        ...(unreadStops(chars.get(name)).length
+          ? { unreadStops: unreadStops(chars.get(name)) }
           : {}),
       })),
       tasks: running,
       // What programs set with InboxClient.setStatus.
       programStatus: inbox.currentSnapshot(),
-      pendingReports: inbox.items.length,
     };
   }
 
@@ -629,10 +680,10 @@ export async function startSupervisor({
   // A process that sends no heartbeat for unresponsiveMs is blocked (a
   // synchronous loop, say): it is killed so the launcher restarts it.
   const LIFECYCLE = {
-    death: "character.died",
-    dimension: "character.dimension",
-    session: "character.session",
-    disconnected: "character.disconnected",
+    death: { type: "character.died", stop: "death" },
+    dimension: { type: "character.dimension", stop: "dimension changed" },
+    session: { type: "character.session", stop: "session changed" },
+    disconnected: { type: "character.disconnected", stop: "disconnected" },
   };
   const watches = new Map();
   function watchHost(c) {
@@ -669,7 +720,7 @@ export async function startSupervisor({
               sessionId,
               kind: "event",
               priority: "urgent",
-              data: { type: LIFECYCLE[event], bot: c.name, ...detail },
+              data: { ...LIFECYCLE[event], bot: c.name, ...detail },
             },
             { source: "runtime" },
           );
@@ -706,6 +757,7 @@ export async function startSupervisor({
               bot: c.name,
               seconds: Math.round((Date.now() - watch.lastBeat) / 1000),
               action: "restarting the character's process",
+              stop: "character process unresponsive",
             },
           },
           { source: "runtime" },
@@ -723,6 +775,13 @@ export async function startSupervisor({
    * called only after the caller confirmed it read the response.
    */
   async function handle(request, signal, stream) {
+    const answer = await answerRequest(request, signal, stream);
+    // Every result but the inbox's says what is waiting there.
+    if (request.type !== "inbox" && request.type !== "shutdown" && answer.response?.status !== "error")
+      answer.response = { ...answer.response, unread: unread() };
+    return answer;
+  }
+  async function answerRequest(request, signal, stream) {
     switch (request.type) {
       case "run": {
         return { response: await run(request, signal, stream) };
@@ -774,7 +833,8 @@ export async function startSupervisor({
       case "inbox":
         if (request.again)
           return { response: lastBatch ? { ...lastBatch, again: true } : { status: "inbox", reports: [] } };
-        return deliver({ status: "inbox" });
+        if (request.full) await full();
+        return deliver({ status: "inbox", ...(request.full ? { full: true } : {}) });
       case "status":
         return { response: status() };
       case "snapshot":

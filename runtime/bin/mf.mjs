@@ -5,9 +5,13 @@
  *   mf start                     start the supervisor and the character(s)
  *   mf stop                      stop them
  *   mf run [options] FILE [ARGS] run a module until it ends: its output
- *                                appears as it is printed, then how it ended
- *   mf inbox [--again]           the reports and stops since you last read
- *                                it (--again: show that last batch again)
+ *                                appears as it is printed, then how it ended.
+ *                                It returns early while an urgent report is
+ *                                unread; the program keeps running.
+ *   mf inbox [--again] [--full]  the reports and stops since you last read
+ *                                it (--again: show that last batch again;
+ *                                --full: the observer sends its whole state
+ *                                again instead of what changed)
  *   mf status                    characters, programs, idle
  *   mf cancel TASK_ID            stop a program (ending `mf run` does not)
  *   mf idle on|off [--bot NAME]  turn the behaviour between programs on or off
@@ -119,6 +123,7 @@ function parse(argv) {
     else if (arg === "--read-only") options.readOnly = true;
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--again") options.again = true;
+    else if (arg === "--full") options.full = true;
     else rest.push(arg);
   }
   return { options, rest };
@@ -145,9 +150,9 @@ function header(result) {
 
 function report(message) {
   const { priority, kind, key, taskId, source, createdAt, data, from: origin, bot, earlierProcess } = message;
-  const mark = priority === "urgent" ? "!" : "-";
-  const label = data?.type ?? key ?? kind;
-  const { type, ...rest } = data && typeof data === "object" ? data : { value: data };
+  const { type, stop, ...rest } = data && typeof data === "object" ? data : { value: data };
+  const mark = priority === "urgent" || stop ? "!" : "-";
+  const label = `${stop ? `stop: ${stop}, ` : ""}${type ?? key ?? kind}`;
   const from = source === "runtime" ? "runtime" : (origin ?? taskId ?? source);
   const about = [from, bot && !origin?.includes(bot) ? bot : null, new Date(createdAt).toISOString().slice(11, 19)]
     .filter(Boolean)
@@ -177,23 +182,38 @@ function print(result) {
   const out = [];
   if (result.status !== "inbox") out.push(header(result));
   if (result.again) out.push("(shown before; repeated with --again)");
-  for (const stop of result.stops ?? []) out.push(`! stop: ${stop.reason} (${stop.character})`);
+  if (result.status === "running")
+    out.push(`(the program keeps running: \`mf cancel ${result.taskId}\` stops it; its end comes as a task.completed report)`);
   const reports = result.reports ?? [];
   if (reports.length) {
     out.push(`--- reports (${reports.length}) ---`);
     for (const message of reports) out.push(report(message));
-  } else if (result.status === "inbox" && !result.stops?.length) out.push("no new reports");
+  } else if (result.status === "inbox") out.push("no new reports");
   if (result.moreReports)
     out.push(`(${result.moreReports} more reports queued; \`mf inbox\` shows them)`);
+  if (result.accumulating?.length)
+    out.push(`(still accumulating, shown later: ${result.accumulating.join(", ")})`);
   const dropped = result.droppedReports;
   if (dropped?.overflow) out.push(`(${dropped.overflow} older reports dropped: queue full)`);
   if (dropped?.expired) out.push(`(${dropped.expired} reports expired before they were shown)`);
+  if (unreadLine(result)) out.push(unreadLine(result));
   process.stdout.write(`${out.join("\n")}\n`);
   // The exit code follows the program: 0 when it finished, 1 when it threw,
   // 130 when it was interrupted, 75 when it was not started.
   if (result.status === "completed" && result.exitCode) process.exitCode = 1;
   if (result.status === "interrupted") process.exitCode = 130;
   if (result.status === "not_started") process.exitCode = 75;
+}
+
+/** The line under a result when reports wait in the inbox. */
+let showUnread = true;
+function unreadLine(result) {
+  const u = result.unread;
+  if (!showUnread || !u?.reports) return "";
+  const parts = [`${u.reports} report${u.reports === 1 ? "" : "s"}`];
+  if (u.urgent) parts.push(`${u.urgent} urgent`);
+  if (u.stops) parts.push(`stop: ${u.stops.join(", ")}`);
+  return `(unread in \`mf inbox\`: ${parts.join(", ")})`;
 }
 
 /** Program output as it arrives: stdout to stdout, stderr to stderr. */
@@ -270,11 +290,16 @@ async function main() {
       if (!rest[0]) throw new Error("usage: mf run [options] FILE [ARGS...]");
       const { inboxWithin, ...runOptions } = options;
       const startedAt = Date.now();
-      print(
-        await request({ type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...runOptions }, streamed),
+      const result = await request(
+        { type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...runOptions },
+        streamed,
       );
+      const inTime = inboxWithin !== undefined && Date.now() - startedAt <= inboxWithin * 1000;
+      // The inbox follows right after: no need to say what waits there.
+      showUnread = !inTime || !result.unread?.reports;
+      print(result);
       if (inboxWithin === undefined) return;
-      if (Date.now() - startedAt > inboxWithin * 1000) {
+      if (!inTime) {
         process.stdout.write(`(ran longer than ${inboxWithin}s: read \`mf inbox\` yourself)\n`);
         return;
       }
@@ -303,6 +328,7 @@ async function main() {
       const result = await request({ type: "snapshot", args: rest, cwd: process.cwd(), ...options });
       if (result.status === "error") return print(result);
       process.stdout.write(result.stdout || `${header(result)}\n${result.stderr ?? ""}\n`);
+      if (unreadLine(result)) process.stdout.write(`${unreadLine(result)}\n`);
       if (result.outputDroppedBytes)
         process.stderr.write(
           `mf: the snapshot was cut (${result.outputDroppedBytes} bytes dropped); see ${result.logDir ?? "the logs"}\n`,
@@ -311,7 +337,7 @@ async function main() {
     }
     default:
       process.stderr.write(
-        "usage: mf start | stop | run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
+        "usage: mf start | stop | run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS] | inbox [--again] [--full] | status | cancel TASK_ID | idle on|off | snapshot\n",
       );
       process.exitCode = 2;
   }

@@ -14,9 +14,10 @@ try {
     );
   else if (action === "urgent")
     result = await client.requestJudgment(JSON.parse(args.join(" ")));
+  else if (action === "retract") result = await client.retract(args[0]);
   else
     throw new Error(
-      "Usage: inbox post JSON | inbox upsert KEY JSON | inbox status KEY JSON | inbox urgent JSON",
+      "Usage: inbox post JSON | inbox upsert KEY JSON | inbox status KEY JSON | inbox urgent JSON | inbox retract ID",
     );
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch (error) {

@@ -17,6 +17,10 @@
  * Everything shares one process: a synchronous loop in one module stops the
  * bot and every other run until it returns.
  *
+ * A `probe` request imports a module and answers whether it controls the
+ * character (`export const control = false` says it does not); the run of
+ * that file that follows within a minute uses the same import.
+ *
  * A `watch` request keeps its connection open and gets a heartbeat every
  * second plus the character's lifecycle events (`lifecycle(event)`). The
  * supervisor uses it to see a blocked process (no heartbeat) and to learn
@@ -158,6 +162,13 @@ export async function startRunner({
   patchGlobals();
   if (socketPath) await rm(socketPath, { force: true });
   const active = new Set();
+  // Modules imported by a probe, by path, for the run that follows.
+  const probed = new Map();
+  const load = (file) => {
+    const kept = probed.get(file);
+    probed.delete(file);
+    return kept && Date.now() - kept.at < 60000 ? kept.module : importModule(file);
+  };
   const watchers = new Set();
   const heartbeat = setInterval(() => {
     for (const client of watchers)
@@ -213,7 +224,7 @@ export async function startRunner({
         ? request.file
         : resolve(request.cwd ?? process.cwd(), request.file);
       const value = await runs.run(state, async () => {
-        const module = await importModule(file);
+        const module = await load(file);
         if (module.control === false) state.control = false;
         const main = module.default ?? module.main;
         if (typeof main !== "function")
@@ -265,6 +276,21 @@ export async function startRunner({
         return;
       }
       if (request.type === "run") void run(client, request);
+      else if (request.type === "probe") {
+        const file = isAbsolute(request.file ?? "")
+          ? request.file
+          : resolve(request.cwd ?? process.cwd(), request.file ?? "");
+        const module = Promise.resolve().then(() => importModule(file));
+        probed.set(file, { module, at: Date.now() });
+        module.then(
+          (loaded) =>
+            client.end(`${JSON.stringify({ type: "probe", control: loaded.control !== false })}\n`),
+          (error) =>
+            client.end(
+              `${JSON.stringify({ type: "probe", control: true, error: String(error?.message ?? error) })}\n`,
+            ),
+        );
+      }
       else if (request.type === "watch") {
         watchers.add(client);
         client.on("close", () => watchers.delete(client));

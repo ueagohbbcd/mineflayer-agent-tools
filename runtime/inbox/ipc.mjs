@@ -20,13 +20,33 @@ export async function createInboxServer({
     };
     const url = new URL(req.url, "http://inbox");
     const receipt = /^\/messages\/([^/]+)\/delivery$/.exec(url.pathname);
+    const one = /^\/messages\/([^/]+)$/.exec(url.pathname);
+    if (req.method === "DELETE" && one) {
+      req.resume();
+      const id = decodeURIComponent(one[1]);
+      return reply(200, { id, retracted: inbox.retract(id) });
+    }
+    if (req.method === "GET" && url.pathname === "/signals") {
+      req.resume();
+      const after = Number(url.searchParams.get("after") ?? 0);
+      const waitMs = Math.min(
+        Math.max(Number(url.searchParams.get("waitMs")) || 0, 0),
+        maxReceiptWaitMs,
+      );
+      return void inbox
+        .signalsAfter(Number.isFinite(after) ? after : 0, waitMs)
+        .then((result) => {
+          if (!res.writableEnded && !res.destroyed) reply(200, result);
+        });
+    }
     if (
       !(req.method === "POST" && url.pathname === "/messages") &&
       !(req.method === "GET" && receipt)
     ) {
       req.resume();
       return reply(404, {
-        error: "Use POST /messages or GET /messages/{id}/delivery",
+        error:
+          "Use POST /messages, DELETE /messages/{id}, GET /messages/{id}/delivery or GET /signals",
       });
     }
     if (receipt) {
@@ -138,6 +158,33 @@ export class InboxClient {
       data,
       priority: "normal",
     });
+  }
+  /**
+   * Take back a message that has not been delivered yet. Resolves
+   * { id, retracted }: false when it was already delivered or gone.
+   */
+  async retract(id) {
+    const { status, result } = await this.request(
+      "DELETE",
+      `/messages/${encodeURIComponent(id)}`,
+    );
+    if (status >= 300) throw new Error(result.error || `HTTP ${status}`);
+    return result;
+  }
+  /**
+   * Requests from the reader after sequence number `after` (type "full":
+   * send your whole state again). Waits up to waitMs (at most 4 s) for one.
+   * Resolves { signals: [{ seq, type, at }], last }.
+   */
+  async signals(after = 0, { waitMs = 0 } = {}) {
+    const { status, result } = await this.request(
+      "GET",
+      `/signals?after=${after}&waitMs=${waitMs}`,
+      undefined,
+      waitMs + this.timeoutMs,
+    );
+    if (status >= 300) throw new Error(result.error || `HTTP ${status}`);
+    return result;
   }
   requestJudgment(data, options = {}) {
     return this.send({

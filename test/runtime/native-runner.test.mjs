@@ -435,3 +435,50 @@ test("RPC consumer errors reject with the host's explicit error", async (t) => {
     /consumer failed/,
   );
 });
+
+test("a probe says whether a module controls the character, and its run reuses the import", async (t) => {
+  const { bot, dir, socketPath } = await setup(t);
+  const file = join(dir, "helper.mjs");
+  // Counts its imports in a global: a second import would count 2.
+  await writeFile(
+    file,
+    `globalThis.helperImports = (globalThis.helperImports ?? 0) + 1;
+    const control = false;
+    export { control };
+    export default async () => globalThis.helperImports;`,
+  );
+  const answer = await rpcRequest(socketPath, { type: "probe", file });
+  assert.equal(answer.control, false, "an export list counts, not only `export const`");
+  const out = new PassThrough();
+  let stdout = "";
+  out.on("data", (c) => (stdout += c));
+  const code = await runModule({ socketPath, file, stdout: out, stderr: new PassThrough(), signals: new EventEmitter() });
+  assert.equal(code, 0);
+  assert.match(stdout, /^1$/m, "one import for the probe and the run");
+  assert.deepEqual(bot.calls, [], "a read-only module leaves movement alone");
+
+  const controlling = join(dir, "walk.mjs");
+  await writeFile(controlling, `export default async () => {};`);
+  assert.equal((await rpcRequest(socketPath, { type: "probe", file: controlling })).control, true);
+  const broken = join(dir, "broken.mjs");
+  await writeFile(broken, `export default (;`);
+  const failed = await rpcRequest(socketPath, { type: "probe", file: broken });
+  assert.equal(failed.control, true);
+  assert.ok(failed.error);
+});
+
+test("a run started read-only leaves movement alone", async (t) => {
+  const { bot, dir, socketPath } = await setup(t);
+  const file = join(dir, "look.mjs");
+  await writeFile(file, `export default async () => {};`);
+  const code = await runModule({
+    socketPath,
+    file,
+    control: false,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    signals: new EventEmitter(),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(bot.calls, []);
+});

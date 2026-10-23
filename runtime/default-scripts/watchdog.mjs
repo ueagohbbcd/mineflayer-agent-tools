@@ -5,9 +5,9 @@
 // progress for minutes, walking in circles, walking into a wall, digging the
 // same block again and again, dying repeatedly in one place (urgent) and
 // repeating the same chat message. Each finding is reported once until the
-// situation changes. Stop it with mf cancel <taskId>, or copy it into
+// situation changes; all unread findings share one report (`watchdog`). Stop it with mf cancel <taskId>, or copy it into
 // your working directory and change the thresholds passed to createTrendWatch.
-import { InboxClient } from "../inbox/index.mjs";
+import { InboxClient, inboxSlot } from "../inbox/index.mjs";
 import { createTrendWatch } from "../observation/trend-watch.mjs";
 
 const MOVES = ["forward", "back", "left", "right"];
@@ -26,13 +26,18 @@ export function startTrendWatchdog({
   ...thresholds
 }) {
   const watch = createTrendWatch(thresholds);
+  const slot = inboxSlot(inbox, "watchdog", {
+    render: (findings, { omitted }) => ({
+      type: "watchdog",
+      findings,
+      ...(omitted ? { omittedOlderFindings: omitted } : {}),
+    }),
+    onError: (error) => console.error(`watchdog: report failed: ${error.message}`),
+  });
+  let seq = 0;
   const send = (findings) => {
-    for (const finding of findings) {
-      const data = { watchdog: finding.type, ...finding };
-      (finding.urgent ? inbox.requestJudgment(data) : inbox.post(data)).catch(
-        (error) => console.error(`watchdog: report failed: ${error.message}`),
-      );
-    }
+    for (const finding of findings)
+      slot.put(++seq, { at: now(), ...finding }, { urgent: Boolean(finding.urgent) });
   };
   const timer = setInterval(() => {
     const entity = bot.entity;
@@ -59,7 +64,9 @@ export function startTrendWatchdog({
   bot.on("death", onDeath);
   bot.on("chat", onChat);
   return {
+    flush: () => slot.flush(),
     close() {
+      slot.close();
       clearInterval(timer);
       bot.off("diggingCompleted", onDig);
       bot.off("death", onDeath);
