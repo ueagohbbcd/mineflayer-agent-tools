@@ -34,7 +34,11 @@ Plugins stay loaded for the life of the bot.
 Give long programs an `AbortSignal` (or a deadline) and undo what they started:
 
 ```js
-export default async function walkTo(bot, { signal, x, y, z }) {
+import pathfinderPkg from "mineflayer-pathfinder";
+const { goals } = pathfinderPkg;
+
+export default async function walkTo(bot, { signal, args }) {
+  const [x, y, z] = args.map(Number);
   const stop = () => bot.pathfinder.setGoal(null);
   signal.addEventListener("abort", stop, { once: true });
   try {

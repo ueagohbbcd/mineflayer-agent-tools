@@ -54,7 +54,7 @@ none).
   beside a background `mf run` in the same batch of tool calls.
 - **Programs you wait for.** Estimate how long the program needs and pass
   `--inbox S`, with S no longer than your tool waits for a command in the
-  foreground: `mf run --inbox 60 walk.mjs 100 -40`. If the program ends
+  foreground (20 if you do not know it): `mf run --inbox 20 look.mjs`. If the program ends
   within S seconds, the inbox follows its result in the same output, as new
   as the result. If it runs longer, your tool has probably moved the command
   to the background, so `mf` leaves the inbox for you to read with
