@@ -49,7 +49,8 @@ none).
   and how it ended.
 - **Look at the game in the foreground.** `mf inbox` returns at once with
   what was reported since you last read it: damage, chat, deaths, what the
-  observer saw. It is the only command that takes reports out of the queue.
+  observer saw. Only `mf inbox`, and `mf run --inbox S` when the program
+  ends within S seconds, take reports out of the queue.
   Read it before deciding something that depends on the game; it can go
   beside a background `mf run` in the same batch of tool calls.
 - **Programs you wait for.** Estimate how long the program needs and pass
@@ -67,8 +68,10 @@ none).
   directory has the program's whole output.
 
 Something written to a background job's output has not been seen until you
-read it, and a harness may drop or delay its notification. That is why
-`mf run` never takes reports: they stay in the inbox until you ask for them.
+read it, and a harness may drop or delay its notification. That is why a
+plain `mf run` never takes reports, and `mf run --inbox S` takes them only
+when it prints them right after a program that ended within S seconds: in
+every other case they stay in the inbox until you ask for them.
 If an `mf inbox` output was lost or cut, `mf inbox --again` shows the last
 batch again.
 

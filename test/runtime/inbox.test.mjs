@@ -119,7 +119,8 @@ test("late completion survives queue overflow, can be claimed by one of simultan
   t.after(() => tasks.close());
   const id = tasks.start("sleep 0.05; printf final");
   assert.equal((await tasks.wait(id, { timeoutMs: 0 })).status, "running");
-  await sleep(100);
+  // Wait for the completion to be queued, however slow the machine.
+  while (!inbox.pending) await sleep(10);
   post(inbox, "replace completion event");
   assert.equal(inbox.drain().dropped.overflow, 1);
   const answers = await Promise.all([tasks.wait(id), tasks.wait(id)]);
