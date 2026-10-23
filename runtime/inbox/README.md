@@ -37,7 +37,7 @@ A send resolves to `{accepted: true, id}` once queued, which is not delivery, an
 
 ## Reading them: `mf inbox`
 
-`mf inbox` prints the queued reports, urgent ones first, as many whole reports as fit in `MF_REPORT_BYTES` (16000); the rest wait for the next read. Changes such as a death come first, as `! changed:` lines. A report counts as read once `mf` has printed it; `mf inbox --again` shows the last batch again.
+`mf inbox` prints the queued reports, urgent ones first, as many whole reports as fit in `MF_REPORT_BYTES` (16000); the rest wait for the next read. Stops such as a death come first, as `! stop:` lines. A report counts as read once `mf` has printed it; `mf inbox --again` shows the last batch again.
 
 Replaceable reports with the same key replace each other only while unread, and only within one character's process (two characters, or a character before and after a restart, keep their own). Give each program its own keys.
 

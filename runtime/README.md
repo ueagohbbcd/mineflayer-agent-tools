@@ -35,7 +35,7 @@ none).
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `mf start` / `mf stop`                                               | Start or stop the supervisor and the character(s)                                          |
 | `mf run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed                            |
-| `mf inbox [--again]`                                                 | The reports and changes since you last read it, at once (`--again` shows that batch again) |
+| `mf inbox [--again]`                                                 | The reports and stops since you last read it, at once (`--again` shows that batch again)   |
 | `mf status`                                                          | Characters, programs, idle, and what programs set with `setStatus` (JSON)                  |
 | `mf cancel TASK_ID`                                                  | Stop a program                                                                             |
 | `mf idle on\|off [--bot NAME]`                                       | Turn the behaviour between programs on or off                                              |
@@ -83,23 +83,25 @@ ended:
 | Result        | When                                                                                                                    | Exit code |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------- | --------- |
 | `completed`   | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr).                         | 0 or 1    |
-| `interrupted` | The module was stopped: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. | 130       |
-| `not_started` | Something changed for this character that you have not read yet. The module was not run.                                | 75        |
+| `interrupted` | The module was stopped: a stop for its character (below), a new program replaced it, or you ran `mf cancel`.            | 130       |
+| `not_started` | A stop for this character that you have not read yet. The module was not run.                                           | 75        |
 
-`not_started` names the character and what changed, and tells you to read
+`not_started` names the character and the reason, and tells you to read
 `mf inbox`; the details are there.
 
-**Changes** stop the character's program and keep the next one from starting
-(lines starting with `! changed:`): the character died, moved to another
-dimension, the session state changed, it disconnected, its process crashed
-or stopped answering, or a watchdog found a blocked loop. They come from the
+A **stop** ends the character's program and keeps the next one from
+starting until you have read it, so that you decide again: the character
+died, moved to another dimension, the session state changed, it
+disconnected, its process crashed or stopped answering, or a watchdog found
+a blocked loop. Stops come from the
 character's process directly, so they hold whatever default scripts run. A
-program or an adapter can add its own with `major: "reason"` in a report's
+program or an adapter can add its own with `stop: "reason"` in a report's
 data.
 
-A change stays in force until `mf inbox` has shown it. So after a death you
-have not read about, `mf run` comes back `not_started` until you read the
-inbox; then it runs.
+`mf inbox` lists stops first, as `! stop: REASON (CHARACTER)` lines. A stop
+stays in force until `mf inbox` has shown it: after a death you have not read
+about, `mf run` comes back `not_started` until you read the inbox; then it
+runs.
 
 `mf inbox` shows the reports that fit in 16000 bytes
 (`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next call. A

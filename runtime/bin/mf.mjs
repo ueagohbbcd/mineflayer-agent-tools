@@ -6,7 +6,7 @@
  *   mf stop                      stop them
  *   mf run [options] FILE [ARGS] run a module until it ends: its output
  *                                appears as it is printed, then how it ended
- *   mf inbox [--again]           the reports and changes since you last read
+ *   mf inbox [--again]           the reports and stops since you last read
  *                                it (--again: show that last batch again)
  *   mf status                    characters, programs, idle
  *   mf cancel TASK_ID            stop a program (ending `mf run` does not)
@@ -177,13 +177,12 @@ function print(result) {
   const out = [];
   if (result.status !== "inbox") out.push(header(result));
   if (result.again) out.push("(shown before; repeated with --again)");
-  for (const change of result.changes ?? [])
-    out.push(`! changed: ${change.reason} (${change.character}, ${new Date(change.at).toISOString().slice(11, 19)})`);
+  for (const stop of result.stops ?? []) out.push(`! stop: ${stop.reason} (${stop.character})`);
   const reports = result.reports ?? [];
   if (reports.length) {
     out.push(`--- reports (${reports.length}) ---`);
     for (const message of reports) out.push(report(message));
-  } else if (result.status === "inbox" && !result.changes?.length) out.push("no new reports");
+  } else if (result.status === "inbox" && !result.stops?.length) out.push("no new reports");
   if (result.moreReports)
     out.push(`(${result.moreReports} more reports queued; \`mf inbox\` shows them)`);
   const dropped = result.droppedReports;
