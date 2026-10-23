@@ -56,7 +56,7 @@
     "watchdog.js",
     "watchdog.mjs",
     "runtime/**/*.mjs",
-    "runtime/README.md"
+    "runtime/**/*.md"
   ],
   "devDependencies": {
     "mineflayer": "4.39.0",

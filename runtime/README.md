@@ -153,16 +153,18 @@ const dog = watchdog(bot); // stuck and repeat: reports; a blocked loop: interru
 ```
 
 Programs report with `InboxClient` (`runtime/inbox/index.mjs`): `post(data)`,
-`upsert(key, data)` (a replaceable state), `requestJudgment(data)` (urgent:
-listed first).
+`upsert(key, data)` (a replaceable state), `setStatus(key, data)` (shown by
+`mf status`), `requestJudgment(data)` (urgent: listed first). See
+[inbox/README.md](inbox/README.md).
 
 ## Default modules
 
 The default scripts and idle are ordinary modules with the same interface as
 yours; "default" only means they are started for you.
 
-- `observer` (state and change reports; tune with `observer.json` in the
-  working directory), `chat` (other players' chat and whispers, and system
+- `observer` (state and change reports, see
+  [observation/README.md](observation/README.md); tune with `observer.json`
+  in the working directory), `chat` (other players' chat and whispers, and system
   lines such as "Respawn point set") and `watchdog` (long-term trends: no
   progress for minutes, circling, repeated deaths) run as kept read-only
   modules on every character. `MF_DEFAULT_SCRIPTS` lists which to start

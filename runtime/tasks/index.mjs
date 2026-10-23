@@ -57,11 +57,7 @@ export class TaskManager {
     this.logBytes = 0;
     this.tasks = new Map();
     this.calls = new Map();
-    this.urgentReason = null;
     this.closed = false;
-    this.onUrgent = (message) =>
-      this.releaseAll(`urgent inbox message ${message.id}`);
-    inbox.on("urgent", this.onUrgent);
   }
   /**
    * label names a task for the model; background marks a long-lived helper
@@ -372,76 +368,36 @@ export class TaskManager {
       result.previouslyReturnedBytes = previously;
     return result;
   }
-  /**
-   * `stallMs` ends the wait early with reason "no progress" when the task
-   * printed nothing and `progress()` (an optional sync function returning a
-   * comparable key, such as the character's rounded position) stayed the same
-   * for that long. 0 or unset waits the full `timeoutMs`. `urgent: false`
-   * keeps waiting through urgent inbox messages.
-   */
-  async wait(
-    id,
-    { timeoutMs = Infinity, signal, stallMs = 0, progress, urgent = true } = {},
-  ) {
+  /** Wait until the task ends, `timeoutMs` passes or `signal` aborts. */
+  async wait(id, { timeoutMs = Infinity, signal } = {}) {
     if (
       timeoutMs !== Infinity &&
       (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 2147483647)
     )
       throw new Error("Invalid wait timeout");
-    if (!Number.isFinite(stallMs) || stallMs < 0 || stallMs > 2147483647)
-      throw new Error("Invalid stall time");
     const task = this.get(id);
     const finish = () => this.claim(task);
     if (task.status === "completed") return finish();
-    const urgentReason = urgent ? this.urgentReason : null;
-    if (urgentReason || signal?.aborted || timeoutMs === 0)
+    if (signal?.aborted || timeoutMs === 0)
       return this.running(
         task,
-        urgentReason ||
-          (signal?.aborted ? "caller detached" : "wait timeout"),
+        signal?.aborted ? "caller detached" : "wait timeout",
       );
     const reason = await new Promise((resolve) => {
       let timer;
-      let stallTimer;
       const wake = (reason) => {
         clearTimeout(timer);
-        clearInterval(stallTimer);
         task.waiters.delete(wake);
         signal?.removeEventListener("abort", abort);
         resolve(reason);
       };
       const abort = () => wake("caller detached");
-      wake.ignoresUrgent = !urgent;
       task.waiters.add(wake);
       signal?.addEventListener("abort", abort, { once: true });
       if (timeoutMs !== Infinity)
         timer = setTimeout(() => wake("wait timeout"), timeoutMs);
-      if (stallMs > 0 && stallMs < timeoutMs) {
-        const key = () =>
-          `${task.written.stdout + task.written.stderr}|${progress?.() ?? ""}`;
-        let last = key();
-        let changedAt = this.now();
-        stallTimer = setInterval(
-          () => {
-            const current = key();
-            if (current !== last) {
-              last = current;
-              changedAt = this.now();
-            } else if (this.now() - changedAt >= stallMs) wake("no progress");
-          },
-          Math.max(10, Math.min(5000, stallMs / 4)),
-        );
-      }
     });
     return task.status === "completed" ? finish() : this.running(task, reason);
-  }
-  releaseAll(reason = "urgent inbox message") {
-    this.urgentReason = reason;
-    for (const task of this.tasks.values())
-      for (const wake of [...task.waiters]) if (!wake.ignoresUrgent) wake(reason);
-  }
-  resumeWaits() {
-    this.urgentReason = null;
   }
   signalTree(task, signal) {
     if (!task.child?.pid) return;
@@ -465,8 +421,6 @@ export class TaskManager {
   }
   async close() {
     this.closed = true;
-    this.inbox.off("urgent", this.onUrgent);
-    this.resumeWaits();
     const running = [...this.tasks.values()].filter(
       (x) => x.status === "running",
     );

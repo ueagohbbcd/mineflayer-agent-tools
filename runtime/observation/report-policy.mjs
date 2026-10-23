@@ -12,6 +12,7 @@
  * - radar: what is near. Distances and positions are rounded to
  *   `radarStep` blocks, so a report comes when something appears, leaves or
  *   comes a step closer; `alerts` (risk signs within 16 blocks) are exact.
+ *   `excluded` (what the radar left out) is not reported.
  *
  * recentBlocks and signs are switched here too; their reports have their own
  * cadence (see nearby-scan.mjs). The on-request sample (observe.mjs) is not
@@ -83,8 +84,11 @@ export function createReportPolicy(config = {}) {
     return out;
   };
   const radar = (r) => {
-    if (!r || typeof r !== "object" || o.radarStep === 0) return r;
-    const out = { ...r };
+    if (!r || typeof r !== "object") return r;
+    // What was left out changes as mobs move behind blocks; `mf snapshot`
+    // still has it.
+    const { excluded: _, ...out } = r;
+    if (o.radarStep === 0) return out;
     for (const name of [
       "players",
       "named",
