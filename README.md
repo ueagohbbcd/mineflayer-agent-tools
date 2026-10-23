@@ -2,7 +2,7 @@
 
 Reusable Mineflayer agent utilities: on-demand perception queries, optional
 historical chunk memory, visual inspection, generic watchdogs, and `mf`, a
-shell runtime that lets an agent drive a real bot one step at a time.
+shell runtime that lets an agent run programs on a real, always-connected bot.
 
 Repository: `ueagohbbcd/mineflayer-agent-tools` (formerly
 `mineflayer-world-memory`; GitHub redirects the old address). The package and
@@ -28,8 +28,9 @@ To let an agent play Minecraft through Mineflayer, give it the
 [`mineflayer-agent` skill](skills/mineflayer-agent/SKILL.md): setup, how to write
 control programs, and guides for moving, looking, items and survival. It runs
 programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
-`mf run program.mjs` returns the program's output and every report since the
-last result. Node 22 or newer.
+`mf run program.mjs` runs a program on the character (in the background of
+your own tool for long ones) and `mf inbox` reads what happened in the game.
+Node 22 or newer.
 
 ## Optional historical world memory
 

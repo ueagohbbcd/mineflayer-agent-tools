@@ -40,13 +40,21 @@ This package ships that long-running process. From your working directory:
 
 ```sh
 export MF_USERNAME=Steve MF_HOST=localhost
-npx mf start                          # connects the character, keeps it alive
-npx mf run look.mjs                   # runs one module, prints its result and the reports since your last result
-npx mf run --wait 20 walk.mjs 100 -40 # come back after 20 s while it keeps walking
-npx mf wait <taskId>                  # keep waiting on it
+npx mf start                  # connects the character and keeps it alive
+npx mf run --inbox look.mjs   # short program: waits for it, prints its result, then the latest reports
+npx mf run walk.mjs 100 -40   # long program: start it with your tool's background shell
+npx mf inbox                  # what happened in the game since your last result, at once
+npx mf cancel <taskId>        # stop a program (stopping the shell command does not)
 ```
 
-A module is `export default async function (bot, { signal, args, log }) { ... }`. Each `mf run` comes back `completed`, `running` (still going: your wait was up, it made no progress, or something needs your attention), `interrupted` (death, disconnect, a blocked loop, or you started another program) or `not_started` (something changed for the character since your last result, shown as `! changed:` lines: read the result first). When a program ends, the character stops walking and fighting, so wait for a walk inside the program. Between your programs the character defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that. Details: [runtime/README.md](../../runtime/README.md).
+A module is `export default async function (bot, { signal, args, log }) { ... }`: the real bot, an abort signal, its arguments. The function ending is the program ending.
+
+- **Keep working while the character acts.** Run long programs (without `--inbox`) in the background of your own tool; your harness tells you when they end. Meanwhile read `mf inbox` whenever you want to know what is going on in the game.
+- **One controlling program per character.** A new `mf run` replaces the running one. Modules with `export const control = false` only read and run beside it. Do not put two controlling runs for the same character in one batch of parallel calls.
+- **Changes stop programs.** A death, a dimension change or a crashed process interrupts the character's program, and the next `mf run` comes back `not_started` with `! changed:` lines unless you have read them already (in `mf inbox`).
+- **When a program ends, the character stops walking and fighting**, so wait for a walk inside the program. Between your programs it defends itself, eats and floats; put your own `idle.mjs` in the working directory to change that, or `mf idle off`.
+
+Details: [runtime/README.md](../../runtime/README.md).
 
 ## How to work
 

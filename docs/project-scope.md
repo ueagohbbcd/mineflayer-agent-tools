@@ -18,8 +18,9 @@ must explicitly handle older saved files, dimension/version separation,
 timestamps, and the async-storage vs synchronous-query contract.
 
 The runtime (`runtime/`, the `mf` command) lets any agent with a shell play
-through a real Mineflayer bot one step at a time: the bot processes, a report
-queue, program scheduling with logs, idle behaviour and default observers
+through a real Mineflayer bot: the bot processes, a report queue, programs
+with logs, idle behaviour and default observers. Running programs in the
+background and telling the model when they end is left to the harness
 (see [runtime/README.md](../runtime/README.md)). It builds on the libraries;
 the libraries never import it.
 

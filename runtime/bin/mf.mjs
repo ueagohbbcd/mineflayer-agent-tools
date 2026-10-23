@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 /**
- * mf: drive Mineflayer characters from a shell, one step at a time.
+ * mf: drive Mineflayer characters from a shell.
  *
  *   mf start                     start the supervisor and the character(s)
  *   mf stop                      stop them
- *   mf run [options] FILE [ARGS] run a module and wait for its result
- *   mf wait [options] TASK_ID    keep waiting on a program that is running
- *   mf cancel TASK_ID            stop a program
- *   mf events                    only the reports queued since the last result
- *   mf status                    characters and running programs
+ *   mf run [options] FILE [ARGS] run a module until it ends: its output
+ *                                appears as it is printed, then how it ended
+ *   mf inbox                     the reports queued since your last result
+ *   mf status                    characters, programs, idle
+ *   mf cancel TASK_ID            stop a program (ending `mf run` does not)
+ *   mf idle on|off [--bot NAME]  turn the behaviour between programs on or off
  *   mf snapshot [--full-entities] [--full-local] [--full-items]
  *
- * Options for run and wait:
- *   --wait S        return after S seconds while the program keeps running
- *                   (default 30; 0 returns at once)
- *   --stall S       return early when, for S seconds, the program printed
- *                   nothing and the character's position, health, food and
- *                   inventory did not change (default 20; 0 turns it off;
- *                   only used when it is shorter than --wait)
+ * Options for run:
  *   --bot NAME      which character (default: the first)
- *   --background    a read-only helper: it does not replace the controlling
- *                   program and is never interrupted
+ *   --inbox         when you wait in the foreground: add `mf inbox` at the end
+ *   --read-only     a helper that does not replace the controlling program
+ *                   (same as `export const control = false` in the module)
+ *   --keep          a read-only helper that keeps running and restarts with
+ *                   its character; mf returns once it has started
+ *
+ * `mf run` waits until the program ends. To do other things meanwhile, run it
+ * in your tool's background shell and read `mf inbox` in the foreground.
  *
  * State lives in MF_STATE_DIR (default ./.mf, so run mf from the directory
  * where you started it). `mf start` needs MF_USERNAME (or MF_USERNAMES) and
@@ -38,16 +39,13 @@ const stateDir = resolve(process.env.MF_STATE_DIR || join(process.cwd(), ".mf"))
 const controlSocket = socketPath(stateDir, "control.sock");
 const supervisorScript = fileURLToPath(new URL("../supervisor.mjs", import.meta.url));
 
-// Output of the program shown in one result; the rest is in its logs.
-const outputBytes = Number(process.env.MF_OUTPUT_BYTES ?? 8000);
-
 /**
  * Send one request and resolve with its result. Results that carry reports
  * wait for `ack()`: call it once the result is printed, and only then do the
  * reports count as given (without it they come again next time).
  */
 let pendingAck = () => {};
-function request(message) {
+function request(message, onStream = () => {}) {
   return new Promise((done, fail) => {
     const socket = net.connect(controlSocket);
     let buffer = "";
@@ -57,18 +55,28 @@ function request(message) {
     socket.on("data", (chunk) => {
       if (settled) return;
       buffer += chunk;
-      const end = buffer.indexOf("\n");
-      if (end < 0) return;
-      settled = true;
-      try {
-        const result = JSON.parse(buffer.slice(0, end));
+      let end;
+      while (!settled && (end = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          settled = true;
+          socket.destroy();
+          return fail(new Error("Unreadable result from the supervisor"));
+        }
+        // Output and progress while the program runs; the result comes last.
+        if (message.stream) {
+          onStream(message);
+          continue;
+        }
+        settled = true;
         pendingAck = () => {
           if (!socket.destroyed) socket.end("ack\n");
         };
-        done(result);
-      } catch {
-        socket.destroy();
-        fail(new Error("Unreadable result from the supervisor"));
+        done(message);
       }
     });
     socket.on("error", (error) => {
@@ -94,15 +102,13 @@ function parse(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (rest.length) rest.push(arg);
-    else if (arg === "--wait" || arg === "--stall") {
-      const value = Number(argv[++i]);
-      if (!Number.isFinite(value) || value < 0) throw new Error(`${arg} needs seconds`);
-      options[arg.slice(2)] = value;
-    } else if (arg === "--bot") {
+    else if (arg === "--bot") {
       options.bot = argv[++i];
       if (!options.bot) throw new Error("--bot needs a character name");
     }
-    else if (arg === "--background") options.background = true;
+    else if (arg === "--read-only") options.readOnly = true;
+    else if (arg === "--keep") options.keep = true;
+    else if (arg === "--inbox") options.inbox = true;
     else rest.push(arg);
   }
   return { options, rest };
@@ -154,33 +160,40 @@ function print(result) {
     process.exitCode = 1;
     return;
   }
-  if (result.status === "status") {
+  if (result.status === "status" || result.status === "idle") {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  // Most important first, so that a harness cutting the end loses the least:
-  // the status, what changed, the program's output, then the other reports.
   const out = [];
-  if (result.status !== "events") out.push(header(result));
+  if (result.status !== "inbox") out.push(header(result));
   for (const change of result.changes ?? [])
     out.push(`! changed: ${change.reason} (${change.character}, ${new Date(change.at).toISOString().slice(11, 19)})`);
-  const stdout = tail(result.stdout, outputBytes);
-  const stderr = tail(result.stderr, Math.max(1000, outputBytes - Buffer.byteLength(stdout.text)));
-  if (stdout.omitted || stderr.omitted || result.previouslyReturnedBytes)
-    out.push(`(earlier output not shown; full output in ${result.logDir ?? "the logs"})`);
-  if (stdout.text) out.push(stdout.text.replace(/\n$/, ""));
-  if (stderr.text) out.push(`--- stderr ---`, stderr.text.replace(/\n$/, ""));
   const reports = result.reports ?? [];
   if (reports.length) {
     out.push(`--- reports (${reports.length}) ---`);
     for (const message of reports) out.push(report(message));
-  } else if (result.status === "events") out.push("no new reports");
+  } else if (result.status === "inbox" && !result.changes?.length) out.push("no new reports");
   if (result.moreReports)
-    out.push(`(${result.moreReports} more reports queued; \`mf events\` shows them)`);
+    out.push(`(${result.moreReports} more reports queued; \`mf inbox\` shows them)`);
   const dropped = result.droppedReports;
   if (dropped?.overflow) out.push(`(${dropped.overflow} older reports dropped: queue full)`);
   if (dropped?.expired) out.push(`(${dropped.expired} reports expired before they were shown)`);
   process.stdout.write(`${out.join("\n")}\n`);
+  // The exit code follows the program: 0 when it finished, 1 when it threw,
+  // 130 when it was interrupted, 75 when it was not started.
+  if (result.status === "completed" && result.exitCode) process.exitCode = 1;
+  if (result.status === "interrupted") process.exitCode = 130;
+  if (result.status === "not_started") process.exitCode = 75;
+}
+
+/** Program output as it arrives: stdout to stdout, stderr to stderr. */
+function streamed(message) {
+  if (message.stream === "started")
+    process.stdout.write(
+      `[started] task=${message.taskId}${message.character ? ` character=${message.character}` : ""}${message.logDir ? ` logs=${message.logDir}` : ""}\n`,
+    );
+  else if (message.stream === "stdout") process.stdout.write(message.text);
+  else if (message.stream === "stderr") process.stderr.write(message.text);
 }
 
 async function start() {
@@ -245,16 +258,20 @@ async function main() {
     case "run":
       if (!rest[0]) throw new Error("usage: mf run [options] FILE [ARGS...]");
       return print(
-        await request({ type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...options }),
+        await request({ type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...options }, streamed),
       );
-    case "wait":
-      if (!rest[0]) throw new Error("usage: mf wait [options] TASK_ID");
-      return print(await request({ type: "wait", taskId: rest[0], ...options }));
     case "cancel":
       if (!rest[0]) throw new Error("usage: mf cancel TASK_ID");
       return print(await request({ type: "cancel", taskId: rest[0] }));
-    case "events":
-      return print(await request({ type: "events" }));
+    case "inbox":
+      return print(await request({ type: "inbox" }));
+    case "idle":
+    {
+      // Options may also come after on|off here.
+      const { options: more } = parse(rest.slice(1));
+      if (rest[0] !== "on" && rest[0] !== "off") throw new Error("usage: mf idle on|off [--bot NAME]");
+      return print(await request({ type: "idle", on: rest[0] === "on", ...options, ...more }));
+    }
     case "status":
       return print(await request({ type: "status" }));
     case "snapshot": {
@@ -269,7 +286,7 @@ async function main() {
     }
     default:
       process.stderr.write(
-        "usage: mf start | stop | run [--wait S] [--stall S] [--bot NAME] [--background] FILE [ARGS] | wait TASK_ID | cancel TASK_ID | events | status | snapshot\n",
+        "usage: mf start | stop | run [--bot NAME] [--inbox] [--read-only] [--keep] FILE [ARGS] | inbox | status | cancel TASK_ID | idle on|off | snapshot\n",
       );
       process.exitCode = 2;
   }

@@ -1,12 +1,14 @@
-# mf: a step-by-step runtime for Mineflayer agents
+# mf: a shell runtime for Mineflayer agents
 
 `mf` lets an agent that only has a shell play through a real Mineflayer bot.
-The agent writes a module, runs it with `mf run`, and gets one result back:
-what the module printed, how it ended, what changed for the characters, and
-the reports (state changes, damage, chat, watchdog findings) since the
-previous result. Then it
-thinks and runs the next module. Nothing has to wake the agent, and the agent
-never has to keep track of time.
+The character stays connected in its own process; the agent writes ordinary
+async JavaScript modules and runs them on it with `mf run`. Programs and the
+default observers keep running while the model thinks.
+
+`mf` does not schedule the model. Running a program in the background,
+telling the model when it ended, and showing its output are the harness's
+job: use your tool's background shell for long programs, and `mf inbox` to
+read what happened in the game.
 
 ## Quick start
 
@@ -14,8 +16,8 @@ never has to keep track of time.
 export MF_USERNAME=Steve MF_HOST=localhost   # MF_PORT (25565) and MC_VERSION (1.21.1) optional
 npx mf start                       # supervisor + the character, in the background
 cat > look.mjs <<'EOF'
-export default async function (bot, { log }) {
-  log(bot.entity.position, bot.health, bot.food);
+export default async function (bot) {
+  return { at: bot.entity.position, health: bot.health, food: bot.food };
 }
 EOF
 npx mf run look.mjs
@@ -32,52 +34,80 @@ none).
 | Command | What it does |
 | --- | --- |
 | `mf start` / `mf stop` | Start or stop the supervisor and the character(s) |
-| `mf run [--wait S] [--stall S] [--bot NAME] [--background] FILE [ARGS]` | Run a module and wait for its result |
-| `mf wait [--wait S] [--stall S] TASK_ID` | Keep waiting on a program that is still running |
+| `mf run [--bot NAME] [--inbox] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
+| `mf inbox` | The reports and changes since your last result, at once |
+| `mf status` | Characters, programs, idle, and what programs set with `setStatus` (JSON) |
 | `mf cancel TASK_ID` | Stop a program |
-| `mf events` | Only the reports since the last result |
-| `mf status` | Characters, running programs and what programs set with `setStatus` (JSON) |
+| `mf idle on\|off [--bot NAME]` | Turn the behaviour between programs on or off |
 | `mf snapshot [--full-entities] [--full-local] [--full-items]` | One full state sample (JSON) |
 
-## A step
+## How to use it
 
-`mf run` returns one of four results, on the first line:
+- **Long programs in the background.** Start `mf run walk.mjs …` with your
+  tool's background shell. You get on with other work; the harness tells you
+  when it ends, and the background job's output has the program's own lines
+  and how it ended.
+- **Look at the game in the foreground.** `mf inbox` returns at once with
+  what was reported since your last result: damage, chat, deaths, what the
+  observer saw. Read it before deciding something that depends on the game.
+- **Short programs in the foreground.** A look around, one placement, a
+  query: `mf run --inbox` waits for them and returns the result followed by
+  the inbox, in one call. Use `--inbox` only when you wait for the result
+  yourself: in a background job's output the reports would sit unread, and
+  `mf inbox` would no longer show them.
+- **Ending `mf run` is not cancelling.** If the shell command is stopped or
+  moved to the background, the program keeps running; its end then shows up
+  in `mf inbox` as `task.completed`. Use `mf cancel TASK_ID` to stop it.
+- **Logs.** `mf run` prints `[started] task=… logs=…` first. The log
+  directory has the program's whole output.
 
-| Result | When |
-| --- | --- |
-| `completed` | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr). |
-| `running` | The module is still running: `--wait` seconds passed (default 30; `0` returns at once), no progress was detected for `--stall` seconds (default 20, used only when shorter than `--wait`: nothing printed and the character's position, health, food and inventory did not change; the program may still be fine, for example waiting for something), or an urgent report needs your attention (low health, a large hit, a chat mention, `requestJudgment`). Use `mf wait TASK_ID` to keep waiting, or run something else. |
-| `interrupted` | The module was stopped because its plan no longer holds: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. |
-| `not_started` | Something changed for this character since your last result. The module was not run; read the result and decide again. |
+Something written to a background job's output has not been seen until you
+read it, and a harness may drop or delay its notification. That is why the
+reports stay in the inbox until you ask for them; `mf inbox` is the way to
+know where things stand.
+
+## Results
+
+`mf run` prints the program's output as it comes, then one line saying how it
+ended:
+
+| Result | When | Exit code |
+| --- | --- | --- |
+| `completed` | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr). | 0 or 1 |
+| `interrupted` | The module was stopped: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. | 130 |
+| `not_started` | Something changed for this character that you have not read yet. The module was not run. | 75 |
+
+With `--inbox`, the changes and reports since your last result follow, the
+same as `mf inbox` would show. A `not_started` result always shows the
+changes that stopped it.
 
 **Changes** stop the character's program and keep the next one from starting
-until a result has shown them (lines starting with `! changed:`): the
-character died, moved to another dimension, the session state changed, it
-disconnected, its process crashed or stopped answering, or a watchdog found a
-blocked loop. They come from the character's process directly, so they hold
-whatever default scripts run. A program or an adapter can add its own by
-putting `major: "reason"` in a report's data.
+(lines starting with `! changed:`): the character died, moved to another
+dimension, the session state changed, it disconnected, its process crashed
+or stopped answering, or a watchdog found a blocked loop. They come from the
+character's process directly, so they hold whatever default scripts run. A
+program or an adapter can add its own with `major: "reason"` in a report's
+data.
 
-A result shows the program's output (the last 8000 bytes, `MF_OUTPUT_BYTES`;
-the rest is in the logs) and the reports that fit in 16000 bytes
-(`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next result
-(`mf events`). Reports and changes count as given only after `mf` has printed
-the result: if `mf` is killed or its reader goes away first, they come again
-next time. Whatever reads `mf`'s output after that (a harness that cuts long
-tool results, say) is outside what `mf` can see, so keep the budgets below
-what your harness shows.
+A change stays in force until a result shows it to you: `mf inbox`,
+`mf run --inbox`, `mf cancel`, or a `not_started` result. So after a death
+you have not read about, the next `mf run` comes back `not_started` with the
+change, and the one after that runs.
 
-`--wait` is your estimate of how long the program needs; output printed so far
-comes back with `running`, and the full output is in the log directory.
+`mf inbox` (and `--inbox`) shows the reports that fit in 16000 bytes
+(`MF_REPORT_BYTES`), urgent ones first; the rest wait for the next call. A
+report counts as given once `mf` has printed it: if `mf` is killed before, it
+comes again. Keep the budget below what your harness shows of one command.
 
 ## One controlling program
 
 A module controls the character unless it says otherwise. Starting a new one
-first stops the current one and waits until it has let go of the bot (a module
-that ignores its abort signal gets its character process restarted). A
-read-only module, marked with `export const control = false` in the module or
-`--background` on the command line, runs beside the controller, is never
-interrupted, and never stops the character's movement when it ends.
+first stops the current one and waits until it has let go of the bot, then
+starts the new one. A read-only module, marked with
+`export const control = false` in the module or `--read-only` on the command
+line, runs beside the controller and never stops the character's movement.
+`--keep` starts a read-only module that keeps running and restarts with its
+character (like the default scripts); `mf` returns once it has started.
 
 When a controlling module ends, however it ends, the character releases its
 movement keys and stops Pathfinder and PvP. A module that sets a goal and
@@ -86,17 +116,10 @@ module. Cancelling is cooperative (the module's `signal` aborts); a module
 that keeps running after that gets its character's process restarted, which
 is the only way to stop code that does not cooperate.
 
-## Between programs: idle
-
-When no program controls the character, the supervisor runs an idle module:
-it fights hostile mobs within 3.5 blocks (with the best sword or axe), eats
-below 14 food and holds jump in water. It never sets a Pathfinder goal or
-chases. What it did comes back as an `idle.summary` report.
-
-Put your own `idle.mjs` in the working directory to replace it. It is loaded
-fresh each time the character becomes idle. If it fails, the built-in one
-runs instead (with an `idle.failed` report) until you change the file.
-`MF_IDLE=off` turns idle off.
+Several `mf run` calls for the same character in one batch of parallel tool
+calls race: the last to arrive is the one that keeps running. Put at most one
+controlling program per character in a batch; `mf inbox`, `mf status` and
+read-only modules can go beside it.
 
 ## Modules
 
@@ -109,13 +132,13 @@ export default async function (bot, { signal, args, log }) {
 }
 ```
 
-Listeners a module adds on `bot` itself and timers it starts are removed when
-it ends; listeners on other objects (`bot.inventory`, `bot._client`, a
-plugin) are yours to remove. When a controlling module is cancelled or throws,
-the character releases its keys and Pathfinder/PvP stop. Relative paths inside
-a module resolve against the character's process, not your shell: build paths
-from `import.meta.url` or pass absolute ones. Each run loads the module file
-fresh, but files it imports are cached until the character restarts.
+The function ending is the program ending. Listeners a module adds on `bot`
+itself and timers it starts are removed when it ends; listeners on other
+objects (`bot.inventory`, `bot._client`, a plugin) are yours to remove.
+Relative paths inside a module resolve against the character's process, not
+your shell: build paths from `import.meta.url` or pass absolute ones. Each run
+loads the module file fresh, but files it imports are cached until the
+character restarts.
 
 Programs import the toolkit through `MF_TOOLKIT_ROOT` (set for every program),
 for example the watchdog that reports into the same queue:
@@ -126,18 +149,30 @@ const dog = watchdog(bot); // stuck and repeat: reports; a blocked loop: interru
 ```
 
 Programs report with `InboxClient` (`runtime/inbox/index.mjs`): `post(data)`,
-`upsert(key, data)` (a replaceable state), `requestJudgment(data)` (urgent).
+`upsert(key, data)` (a replaceable state), `requestJudgment(data)` (urgent:
+listed first).
 
-## Default background scripts
+## Default modules
 
-Started with the supervisor, restarted with the character: `observer` (state
-and change reports; tune with `observer.json` in the working directory),
-`chat` (other players' chat and whispers, and system lines such as
-"Respawn point set"; `MF_CHAT_WAKE=mention` wakes on your name and whispers,
-`all` on every player line) and
-`watchdog` (long-term trends: no progress for minutes, circling, repeated
-deaths). `MF_DEFAULT_SCRIPTS` lists which to start (default
-`observer,chat,watchdog`).
+The default scripts and idle are ordinary modules with the same interface as
+yours; "default" only means they are started for you.
+
+- `observer` (state and change reports; tune with `observer.json` in the
+  working directory), `chat` (other players' chat and whispers, and system
+  lines such as "Respawn point set") and `watchdog` (long-term trends: no
+  progress for minutes, circling, repeated deaths) run as kept read-only
+  modules on every character. `MF_DEFAULT_SCRIPTS` lists which to start
+  (default `observer,chat,watchdog`). Stop one with `mf cancel`; start it, or
+  your own copy, with `mf run --keep FILE` (the files are in
+  `$MF_TOOLKIT_ROOT/runtime/default-scripts/`).
+- `idle` runs when no program controls the character: it fights hostile mobs
+  within 3.5 blocks (with the best sword or axe), eats below 14 food and holds
+  jump in water. It never sets a Pathfinder goal or chases. What it did comes
+  back as an `idle.summary` report. Put your own `idle.mjs` in the working
+  directory to replace it; it is loaded fresh each time the character becomes
+  idle, and if it fails the built-in one runs instead (with an `idle.failed`
+  report) until you change the file. `mf idle off` (or `MF_IDLE=off`, or
+  cancelling the idle task) turns it off.
 
 ## Processes
 
@@ -169,11 +204,9 @@ synchronous loop, is killed and restarted, and its program is interrupted.
 | `MC_VERSION` | 1.21.1 | Game version |
 | `MF_AUTH`, `MF_PROFILES_DIR` | offline | `microsoft` logs in with an account; profiles are cached in the directory |
 | `MF_STATE_DIR` | `./.mf` | State, sockets and logs |
-| `MF_WAIT_SECONDS`, `MF_STALL_SECONDS` | 30, 20 | Defaults for `--wait` and `--stall` |
-| `MF_IDLE` | on | `off` turns idle off |
+| `MF_IDLE` | on | `off` starts with idle off |
 | `MF_DEFAULT_SCRIPTS` | `observer,chat,watchdog` | Which default scripts run |
-| `MF_CHAT_WAKE` | none | `mention` or `all` (see above) |
-| `MF_OUTPUT_BYTES`, `MF_REPORT_BYTES` | 8000, 16000 | How much program output and report text one result shows |
+| `MF_REPORT_BYTES` | 16000 | How much report text one result shows |
 | `MF_HOST_UNRESPONSIVE_SECONDS` | 20 | Restart a character's process after this long without a heartbeat |
 
 A character process that keeps exiting is restarted after 2 s, then later each

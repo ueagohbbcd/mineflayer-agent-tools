@@ -36,7 +36,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Inbox, createInboxServer } from "./inbox/index.mjs";
 import { TaskManager } from "./tasks/index.mjs";
 import { startBotHosts } from "./host/launcher.mjs";
-import { createMotionProbe } from "./host/motion-probe.mjs";
+import { StringDecoder } from "node:string_decoder";
 import { status as hostStatus } from "./host/rpc.mjs";
 import { socketPath } from "./socket-path.mjs";
 
@@ -131,8 +131,6 @@ export async function startSupervisor({
     .map((name) => name.trim())
     .filter(Boolean),
   idle: idleEnabled = env.MF_IDLE !== "off",
-  waitSeconds = Number(env.MF_WAIT_SECONDS ?? 30),
-  stallSeconds = Number(env.MF_STALL_SECONDS ?? 20),
   // Longer than run.mjs's grace for a stuck module (it then stops the host),
   // so a replaced program has really let go of the bot before the next starts.
   killGraceMs = 5000,
@@ -235,6 +233,7 @@ export async function startSupervisor({
         seq: 0,
         idleTimer: undefined,
         idleCustomFailed: null,
+        idleOff: !idleEnabled,
       },
     ]),
   );
@@ -342,9 +341,9 @@ export async function startSupervisor({
     await Promise.all(ids.map(completion));
   }
 
-  const idleBlocked = (c) => closed || c.controller || c.idle || c.starting;
+  const idleBlocked = (c) => closed || c.idleOff || c.controller || c.idle || c.starting;
   function scheduleIdle(c, delayMs = 0) {
-    if (!idleEnabled || closed) return;
+    if (c.idleOff || closed) return;
     clearTimeout(c.idleTimer);
     c.idleTimer = setTimeout(() => void startIdle(c), delayMs);
   }
@@ -413,10 +412,16 @@ export async function startSupervisor({
 
   /**
    * The result plus what it can carry: every undelivered change and as many
-   * reports as fit in the budget. `commit` marks exactly those as given.
+   * reports as fit in the budget. `commit` marks exactly those reports as
+   * given, and clears the changes it showed. `mf run` uses it only when the
+   * caller waits in the foreground and asks for it (`--inbox`); otherwise a
+   * background program's end would mark reports given while they sit unread
+   * in the job's output. A refused start shows the changes (reports: false).
    */
-  function deliver(result) {
-    const batch = inbox.select({ maxBytes: reportBytes });
+  function deliver(result, { reports = true } = {}) {
+    const batch = reports
+      ? inbox.select({ maxBytes: reportBytes })
+      : { ids: [], messages: [], remaining: 0, dropped: { overflow: 0, expired: 0 } };
     const changes = [...chars.values()].flatMap((c) => c.changes);
     const upTo = new Map([...chars.values()].map((c) => [c, c.seq]));
     const generationOf = (bot) => chars.get(bot)?.host.generation;
@@ -430,6 +435,11 @@ export async function startSupervisor({
           const stopped =
             message.data?.type === "task.completed" &&
             tasks.tasks.get(message.data.taskId)?.interruptReason;
+          // An unwatched program's end carries only the end of its output.
+          if (message.data?.type === "task.completed")
+            for (const channel of ["stdout", "stderr"])
+              if (typeof message.data[channel] === "string" && message.data[channel].length > 2000)
+                message.data = { ...message.data, [channel]: `…${message.data[channel].slice(-2000)}` };
           return {
             ...message,
             ...(label ? { from: label } : {}),
@@ -455,33 +465,32 @@ export async function startSupervisor({
     return { response, commit };
   }
 
-  async function waitTask(id, { wait, stall, signal }) {
-    const timeoutMs = Math.max(0, wait ?? waitSeconds) * 1000;
-    const stallMs = Math.max(0, stall ?? stallSeconds) * 1000;
-    const probe =
-      stallMs > 0 && stallMs < timeoutMs
-        ? createMotionProbe({ socketPath: socketOf(taskBots.get(id)) })
-        : undefined;
-    let result;
-    try {
-      result = await tasks.wait(id, {
-        timeoutMs,
-        stallMs,
-        progress: probe?.key,
-        signal,
-      });
-    } finally {
-      probe?.close();
-    }
+  /**
+   * Wait until the program ends (or the caller goes away: the program keeps
+   * running and its end is reported in the inbox). Its output went to the
+   * caller as it was printed, so the result leaves it out.
+   */
+  async function waitTask(id, { signal }) {
+    const result = await tasks.wait(id, { signal, urgent: false });
+    const { stdout: _, stderr: __, ...rest } = result;
     const task = tasks.tasks.get(id);
-    if (task?.interruptReason) {
-      if (result.status === "running") {
-        tasks.resumeWaits();
-        result = await tasks.wait(id, { timeoutMs: killGraceMs + 10000, signal });
-      }
-      result = { ...result, status: "interrupted", reason: task.interruptReason };
+    return task?.interruptReason && result.status === "completed"
+      ? { ...rest, status: "interrupted", reason: task.interruptReason }
+      : rest;
+  }
+
+  /** Send the task's output to the caller as it is printed. */
+  function streamTask(id, stream) {
+    const task = tasks.tasks.get(id);
+    if (!stream || !task?.child) return;
+    stream({ stream: "started", taskId: id, character: taskBots.get(id), ...(task.logDir ? { logDir: task.logDir } : {}) });
+    for (const channel of ["stdout", "stderr"]) {
+      const decoder = new StringDecoder("utf8");
+      task.child[channel].on("data", (data) => {
+        const text = decoder.write(data);
+        if (text) stream({ stream: channel, text });
+      });
     }
-    return result;
   }
 
   const notStarted = (c) => ({
@@ -490,7 +499,7 @@ export async function startSupervisor({
     reason: `${[...new Set(c.changes.map((change) => change.reason))].join(", ")} since your last result; the program was not started`,
   });
 
-  async function run(request, signal) {
+  async function run(request, signal, stream) {
     if (typeof request.file !== "string" || !request.file)
       throw new Error("run needs a module file");
     const c = charOf(request.bot); // An unknown character fails before anything stops.
@@ -498,8 +507,10 @@ export async function startSupervisor({
     const file = isAbsolute(request.file) ? request.file : resolve(cwdOf, request.file);
     if (!existsSync(file)) throw new Error(`No such module: ${file}`);
     // A module that declares itself read-only runs beside the controller.
-    const background =
-      request.background === true ||
+    // A kept module is read-only too, and restarts with its character.
+    const readOnly =
+      request.readOnly === true ||
+      request.keep === true ||
       /^export\s+const\s+control\s*=\s*false\b/m.test(await readFile(file, "utf8"));
     const start = () =>
       startTask(file, {
@@ -507,11 +518,17 @@ export async function startSupervisor({
         bot: request.bot,
         cwd: cwdOf,
         label: basename(file),
-        background,
+        background: readOnly,
+        persistent: request.keep === true,
       });
-    if (background) {
+    if (readOnly) {
       await hostReady(request.bot);
-      return waitTask(start(), { ...request, signal });
+      const id = start();
+      // A kept module never ends by design: say it started and return.
+      if (request.keep)
+        return { status: "started", taskId: id, character: c.name, logDir: tasks.tasks.get(id).logDir };
+      streamTask(id, stream);
+      return waitTask(id, { signal });
     }
     if (c.changes.length) return notStarted(c);
     c.starting++;
@@ -542,7 +559,8 @@ export async function startSupervisor({
         scheduleIdle(c, 0);
       }
     });
-    return waitTask(id, { ...request, signal });
+    streamTask(id, stream);
+    return waitTask(id, { signal });
   }
 
   async function snapshot(request) {
@@ -589,6 +607,7 @@ export async function startSupervisor({
       characters: hosts.bots.map(({ name, pid }) => ({
         name,
         running: Boolean(pid),
+        idle: !chars.get(name).idleOff,
         ...(chars.get(name).changes.length
           ? { undeliveredChanges: chars.get(name).changes.map((change) => change.reason) }
           : {}),
@@ -697,26 +716,58 @@ export async function startSupervisor({
    * Answer one request: { response, commit? }. commit, when present, is
    * called only after the caller confirmed it read the response.
    */
-  async function handle(request, signal) {
+  async function handle(request, signal, stream) {
     switch (request.type) {
-      case "run":
-        return deliver(await run(request, signal));
-      case "wait":
-        if (typeof request.taskId !== "string") throw new Error("wait needs a taskId");
-        return deliver(await waitTask(request.taskId, { ...request, signal }));
+      case "run": {
+        const result = await run(request, signal, stream);
+        if (request.inbox) return deliver(result);
+        if (result.status === "not_started") return deliver(result, { reports: false });
+        return { response: result };
+      }
       case "cancel": {
         if (typeof request.taskId !== "string") throw new Error("cancel needs a taskId");
         const task = tasks.get(request.taskId);
+        const c = chars.get(taskBots.get(request.taskId));
+        // Cancelling idle turns it off for that character (`mf idle on` again).
+        if (c?.idle?.id === request.taskId) {
+          c.idleOff = true;
+          c.idle.cancelled = true;
+        }
         if (task.status === "running") {
-          if (request.taskId === chars.get(taskBots.get(request.taskId))?.controller)
-            task.interruptReason ??= "cancelled";
+          if (request.taskId === c?.controller) task.interruptReason ??= "cancelled";
           cancelTask(request.taskId);
           await completion(request.taskId);
         }
-        return deliver(await waitTask(request.taskId, { wait: 0, stall: 0 }));
+        return deliver({
+          status: task.interruptReason ? "interrupted" : "completed",
+          ...(task.interruptReason ? { reason: task.interruptReason } : {}),
+          taskId: task.id,
+          label: task.label,
+          exitCode: task.exitCode,
+          signal: task.signal,
+          startedAt: task.startedAt,
+          completedAt: task.completedAt,
+          ...(task.logDir ? { logDir: task.logDir } : {}),
+        });
       }
-      case "events":
-        return deliver({ status: "events" });
+      case "idle": {
+        const targets = request.bot ? [charOf(request.bot)] : [...chars.values()];
+        for (const c of targets) {
+          c.idleOff = request.on === false;
+          if (c.idleOff && c.idle) {
+            c.idle.cancelled = true;
+            cancelTask(c.idle.id);
+          } else if (!c.idleOff) scheduleIdle(c, 0);
+        }
+        return {
+          response: {
+            status: "idle",
+            characters: targets.map((c) => ({ name: c.name, idle: !c.idleOff })),
+          },
+        };
+      }
+      case "inbox":
+        return deliver({ status: "inbox" });
       case "status":
         return { response: status() };
       case "snapshot":
@@ -753,7 +804,10 @@ export async function startSupervisor({
       } catch {
         return client.end(`${JSON.stringify({ status: "error", error: "Bad request" })}\n`);
       }
-      handle(request, detached.signal).then(
+      const stream = (message) => {
+        if (!client.destroyed) client.write(`${JSON.stringify(message)}\n`);
+      };
+      handle(request, detached.signal, stream).then(
         ({ response, commit }) => {
           // A caller that has gone gets nothing, and nothing counts as given.
           if (client.destroyed || detached.signal.aborted) return;
