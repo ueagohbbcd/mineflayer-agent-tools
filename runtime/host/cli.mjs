@@ -1,9 +1,13 @@
 #!/usr/bin/env node
+import { installPackageFallback } from "./package-fallback.mjs";
 import { createCompatibleBot } from "./minecraft-compat.mjs";
 import { attachWorldMemory } from "./world-memory.mjs";
 import { resolve } from "node:path";
 import { startRunner } from "./runner.mjs";
 import { sessionObject } from "./session.mjs";
+
+// Programs in the agent's own directory can import vec3, plugins and the like.
+installPackageFallback();
 
 const required = (key) => {
   const value = process.env[key];
@@ -20,7 +24,9 @@ const bot = createCompatibleBot({
     process.env.MF_HOST ||
     process.env.ARENA_MINECRAFT_HOST ||
     required("MF_HOST"),
-  port: Number(process.env.MF_PORT ?? process.env.ARENA_MINECRAFT_PORT ?? 25565),
+  port: Number(
+    process.env.MF_PORT ?? process.env.ARENA_MINECRAFT_PORT ?? 25565,
+  ),
   version: process.env.MC_VERSION ?? "1.21.1",
   username,
   auth: process.env.MF_AUTH ?? "offline",
@@ -101,7 +107,11 @@ bot.once("spawn", async () => {
           session = await readSession();
           sessionFailure = undefined;
           if (previous && previous.state !== session.state)
-            runner?.lifecycle({ event: "session", from: previous.state, state: session.state });
+            runner?.lifecycle({
+              event: "session",
+              from: previous.state,
+              state: session.state,
+            });
           if (previous?.state === "running" && session.state !== "running") {
             bot.clearControlStates?.();
             bot.pathfinder?.stop?.();
@@ -128,7 +138,13 @@ bot.once("spawn", async () => {
       dimension = now ?? dimension;
     });
     bot.on("kicked", (reason) =>
-      runner.lifecycle({ event: "disconnected", reason: (typeof reason === "string" ? reason : JSON.stringify(reason)).slice(0, 300) }),
+      runner.lifecycle({
+        event: "disconnected",
+        reason: (typeof reason === "string"
+          ? reason
+          : JSON.stringify(reason)
+        ).slice(0, 300),
+      }),
     );
     process.stdout.write(`Bot host ready: ${bot.username}\n`);
   } catch (error) {

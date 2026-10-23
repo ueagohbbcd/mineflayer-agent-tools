@@ -31,15 +31,15 @@ none).
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `mf start` / `mf stop` | Start or stop the supervisor and the character(s) |
-| `mf run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed |
-| `mf inbox [--again]` | The reports and changes since you last read it, at once (`--again` shows that batch again) |
-| `mf status` | Characters, programs, idle, and what programs set with `setStatus` (JSON) |
-| `mf cancel TASK_ID` | Stop a program |
-| `mf idle on\|off [--bot NAME]` | Turn the behaviour between programs on or off |
-| `mf snapshot [--full-entities] [--full-local] [--full-items]` | One full state sample (JSON) |
+| Command                                                              | What it does                                                                               |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `mf start` / `mf stop`                                               | Start or stop the supervisor and the character(s)                                          |
+| `mf run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS]` | Run a module until it ends; its output appears as it is printed                            |
+| `mf inbox [--again]`                                                 | The reports and changes since you last read it, at once (`--again` shows that batch again) |
+| `mf status`                                                          | Characters, programs, idle, and what programs set with `setStatus` (JSON)                  |
+| `mf cancel TASK_ID`                                                  | Stop a program                                                                             |
+| `mf idle on\|off [--bot NAME]`                                       | Turn the behaviour between programs on or off                                              |
+| `mf snapshot [--full-entities] [--full-local] [--full-items]`        | One full state sample (JSON)                                                               |
 
 ## How to use it
 
@@ -77,11 +77,11 @@ batch again.
 `mf run` prints the program's output as it comes, then one line saying how it
 ended:
 
-| Result | When | Exit code |
-| --- | --- | --- |
-| `completed` | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr). | 0 or 1 |
-| `interrupted` | The module was stopped: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. | 130 |
-| `not_started` | Something changed for this character that you have not read yet. The module was not run. | 75 |
+| Result        | When                                                                                                                    | Exit code |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | --------- |
+| `completed`   | The module returned (its return value is printed as JSON) or threw (`exit 1`, error in stderr).                         | 0 or 1    |
+| `interrupted` | The module was stopped: something changed for its character (below), a new program replaced it, or you ran `mf cancel`. | 130       |
+| `not_started` | Something changed for this character that you have not read yet. The module was not run.                                | 75        |
 
 `not_started` names the character and what changed, and tells you to read
 `mf inbox`; the details are there.
@@ -139,8 +139,10 @@ export default async function (bot, { signal, args, log }) {
 The function ending is the program ending. Listeners a module adds on `bot`
 itself and timers it starts are removed when it ends; listeners on other
 objects (`bot.inventory`, `bot._client`, a plugin) are yours to remove.
-Relative paths inside a module resolve against the character's process, not
-your shell: build paths from `import.meta.url` or pass absolute ones. Each run
+A module can import the packages installed with the toolkit (`vec3`,
+`mineflayer-pathfinder` and so on) by name from any directory; a package
+installed next to the module wins. Relative paths inside a module resolve
+against the character's process, not your shell: build paths from `import.meta.url` or pass absolute ones. Each run
 loads the module file fresh, but files it imports are cached until the
 character restarts.
 
@@ -148,7 +150,9 @@ Programs import the toolkit through `MF_TOOLKIT_ROOT` (set for every program),
 for example the watchdog that reports into the same queue:
 
 ```js
-const { watchdog } = await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`);
+const { watchdog } = await import(
+  `${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`
+);
 const dog = watchdog(bot); // stuck and repeat: reports; a blocked loop: interrupts this program
 ```
 
@@ -203,17 +207,17 @@ synchronous loop, is killed and restarted, and its program is interrupted.
 
 ## Settings
 
-| Variable | Default | |
-| --- | --- | --- |
-| `MF_USERNAME` / `MF_USERNAMES` | (required) | Character name(s) |
-| `MF_HOST`, `MF_PORT` | (required), 25565 | Server (`ARENA_MINECRAFT_HOST`/`_PORT` still work) |
-| `MC_VERSION` | 1.21.1 | Game version |
-| `MF_AUTH`, `MF_PROFILES_DIR` | offline | `microsoft` logs in with an account; profiles are cached in the directory |
-| `MF_STATE_DIR` | `./.mf` | State, sockets and logs |
-| `MF_IDLE` | on | `off` starts with idle off |
-| `MF_DEFAULT_SCRIPTS` | `observer,chat,watchdog` | Which default scripts run |
-| `MF_REPORT_BYTES` | 16000 | How much report text one result shows |
-| `MF_HOST_UNRESPONSIVE_SECONDS` | 20 | Restart a character's process after this long without a heartbeat |
+| Variable                       | Default                  |                                                                           |
+| ------------------------------ | ------------------------ | ------------------------------------------------------------------------- |
+| `MF_USERNAME` / `MF_USERNAMES` | (required)               | Character name(s)                                                         |
+| `MF_HOST`, `MF_PORT`           | (required), 25565        | Server (`ARENA_MINECRAFT_HOST`/`_PORT` still work)                        |
+| `MC_VERSION`                   | 1.21.1                   | Game version                                                              |
+| `MF_AUTH`, `MF_PROFILES_DIR`   | offline                  | `microsoft` logs in with an account; profiles are cached in the directory |
+| `MF_STATE_DIR`                 | `./.mf`                  | State, sockets and logs                                                   |
+| `MF_IDLE`                      | on                       | `off` starts with idle off                                                |
+| `MF_DEFAULT_SCRIPTS`           | `observer,chat,watchdog` | Which default scripts run                                                 |
+| `MF_REPORT_BYTES`              | 16000                    | How much report text one result shows                                     |
+| `MF_HOST_UNRESPONSIVE_SECONDS` | 20                       | Restart a character's process after this long without a heartbeat         |
 
 A character process that keeps exiting is restarted after 2 s, then later each
 time, up to a minute.
