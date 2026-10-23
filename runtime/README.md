@@ -66,7 +66,10 @@ none).
   program's `requestJudgment`, a repeated death) makes it return at once,
   as `running`; an urgent report already unread when you run returns
   right after the start. The program keeps running. With `--inbox S` the
-  inbox follows, as for any result within S seconds.
+  inbox follows, as for any result within S seconds. This is the way for a
+  program to ask for attention without giving up: look whether it still
+  makes progress, and if it does, let it run (wait, or write the next
+  program meanwhile).
 - **Ending `mf run` is not cancelling.** If the shell command is stopped or
   moved to the background, the program keeps running; its end then shows up
   in `mf inbox` as `task.completed`. Use `mf cancel TASK_ID` to stop it.
