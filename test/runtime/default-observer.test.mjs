@@ -281,28 +281,19 @@ test("default observer reports state changes only after the previous report was 
   assert.equal(bot.listenerCount("end"), 0);
 });
 
-test("observer events stay urgent: they release a wait without stopping the program", async (t) => {
+test("observer events are urgent", async (t) => {
   const inbox = new Inbox({ sessionId: "observer-urgent" });
-  const tasks = new TaskManager({ inbox });
-  t.after(() => tasks.close());
   const bot = fakeBot();
   await observe(t, bot, inbox);
   await until(() => report(inbox));
   inbox.drain();
 
-  const id = tasks.start("sleep 0.15; printf still-running");
-  const waiting = tasks.wait(id);
   bot.health = 9;
   bot.emit("damage");
-  const released = await waiting;
-  assert.equal(released.status, "running");
-  assert.match(released.reason, /urgent inbox/);
+  await until(() => inbox.items.some((item) => item.message.kind === "event"));
   const event = inbox.drain().messages.find((m) => m.kind === "event");
   assert.equal(event.priority, "urgent");
   assert.equal(event.data.health, 9);
-  tasks.resumeWaits();
-  const completed = await tasks.wait(id);
-  assert.equal(completed.stdout, "still-running");
 });
 
 test("native observer reports bot disconnect and removes its listeners on close", async () => {

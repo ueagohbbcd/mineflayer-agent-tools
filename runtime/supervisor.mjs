@@ -11,10 +11,9 @@
  * - the idle behaviour between the model's programs;
  * - a control socket that bin/mf.mjs talks to.
  *
- * One step: `run` starts a program and waits until it ends, is interrupted,
- * or returns early (its wait time is up, it made no progress, or a report
- * needs the model's attention); the result carries the reports queued since
- * the last result, up to a size budget. See runtime/README.md.
+ * `run` starts a program, streams its output and waits until it ends or is
+ * interrupted. `inbox` returns the reports and changes queued since the last
+ * read, up to a size budget. See runtime/README.md.
  *
  * Each character has its own controlling program, idle behaviour, takeover
  * lock and list of changes the caller has not been given yet. Those changes
@@ -465,7 +464,6 @@ export async function startSupervisor({
         };
       // Only the changes this result showed; later ones still block starts.
       for (const [c, seq] of upTo) c.changes = c.changes.filter((change) => change.seq > seq);
-      tasks.resumeWaits();
     };
     return { response, commit };
   }
@@ -476,7 +474,7 @@ export async function startSupervisor({
    * caller as it was printed, so the result leaves it out.
    */
   async function waitTask(id, { signal }) {
-    const result = await tasks.wait(id, { signal, urgent: false });
+    const result = await tasks.wait(id, { signal });
     const { stdout: _, stderr: __, ...rest } = result;
     const task = tasks.tasks.get(id);
     return task?.interruptReason && result.status === "completed"
@@ -579,8 +577,7 @@ export async function startSupervisor({
       label: "snapshot",
       background: true,
     });
-    // Pending urgent reports are for the model's programs, not this read.
-    const result = await tasks.wait(id, { timeoutMs: 15000, urgent: false });
+    const result = await tasks.wait(id, { timeoutMs: 15000 });
     if (result.status !== "completed") cancelTask(id);
     await completion(id);
     const task = tasks.tasks.get(id);

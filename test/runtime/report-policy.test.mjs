@@ -22,6 +22,7 @@ const sample = (x, extra = {}) => ({
       { chunk: { x: 0, z: 0 }, counts: { zombie: 1 }, nearest: 9 },
     ],
     alerts: [{ id: 1, distance: 3.2 }],
+    excluded: { outsideRadius: 0, blocked: 1, unknownVisibility: 0 },
   },
 });
 
@@ -47,6 +48,9 @@ test("radar distances are rounded to steps; alerts stay exact", () => {
   assert.equal(radar.alerts[0].distance, 3.2);
   const exact = createReportPolicy({ radarStep: 0, positionStep: 0 });
   assert.equal(exact.project(sample(0)).radar.players[0].distance, 13);
+  // What the radar left out is not reported: it changes as mobs move.
+  assert.equal(radar.excluded, undefined);
+  assert.equal(exact.project(sample(0)).radar.excluded, undefined);
 });
 
 test("items can be turned off, and bad settings are refused", () => {
