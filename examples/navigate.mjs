@@ -64,13 +64,26 @@ export default async function navigate(bot, { signal, args = [] }) {
   try {
     await bot.pathfinder.goto(goal);
     signal?.throwIfAborted();
-    if (!goal.isEnd(bot.entity.position.floored()))
-      throw new Error("Pathfinder finished without reaching the goal");
-    return { status: "arrived", position: { ...bot.entity.position } };
+    // goto also resolves on an empty path, which Pathfinder reports when it
+    // finds no route as well, so check arrival the way Pathfinder decides
+    // goal_reached: the feet cell or the cell above it meets the goal.
+    const feet = bot.entity.position.floored();
+    if (!goal.isEnd(feet) && !goal.isEnd(feet.offset(0, 1, 0)))
+      throw Object.assign(
+        new Error("Pathfinder finished without reaching the goal"),
+        { name: "NotReached" },
+      );
+    return {
+      status: "arrived",
+      reason: "pathfinder_goal_reached",
+      goal: xyz,
+      path: latestPath,
+      position: { ...bot.entity.position },
+    };
   } catch (error) {
     if (stalled) return stalled;
     if (!signal?.aborted) {
-      error.message += ` (goal ${xyz.join(" ")}, at ${bot.entity.position.floored()})`;
+      error.message += ` (Pathfinder ${error.name}, last path ${latestPath?.status ?? "unknown"}, goal ${xyz.join(" ")}, at ${bot.entity.position.floored()})`;
       throw error;
     }
   } finally {

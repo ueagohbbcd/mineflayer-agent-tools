@@ -92,6 +92,7 @@ Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a 
 - **One controller at a time.** Every program on the same bot shares its movement keys, Pathfinder goal, main hand and open window. Let only one program move or use the hand; read-only programs can run beside it.
 - **Never block the event loop.** Mineflayer handles packets on the same thread as your code. A synchronous loop freezes the bot (physics, keep-alives, events). `await` between steps.
 - **Make programs stoppable.** Clear goals and controls in `finally` (`bot.pathfinder.setGoal(null)`, `bot.clearControlStates()`), and stop on an abort signal or a timeout.
+- **Use what the plugins report.** Pathfinder's `goto`, `goal_reached` and `path_update` (`noPath`, `timeout`), PvP's `attack`, `stop` and `stoppedAttacking` already say how a walk or a fight ended; build on them instead of your own distance tests or sleeps. A timeout is a fallback with the plugin's last status attached, not proof that something happened.
 - **Play fair.** Use what Mineflayer and its plugins do. Do not write packets yourself (`bot._client`), change physics, fly, or run commands you are not meant to use. When stuck, solve it in the game: dig, jump, place a block, take another route.
 
 ## This package
