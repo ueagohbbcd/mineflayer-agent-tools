@@ -4,6 +4,7 @@ import { createCompatibleBot } from "./minecraft-compat.mjs";
 import { attachWorldMemory } from "./world-memory.mjs";
 import { resolve } from "node:path";
 import { startRunner } from "./runner.mjs";
+import { setting } from "../env.mjs";
 import { sessionObject } from "./session.mjs";
 
 // Programs in the agent's own directory can import vec3, plugins and the like.
@@ -15,8 +16,9 @@ const required = (key) => {
   return value;
 };
 const username = required("MF_USERNAME");
-const sessionUrl = process.env.ARENA_SESSION_URL
-  ? `${process.env.ARENA_SESSION_URL}${process.env.ARENA_SESSION_URL.includes("?") ? "&" : "?"}username=${encodeURIComponent(username)}`
+const sessionBase = setting("SESSION_URL");
+const sessionUrl = sessionBase
+  ? `${sessionBase}${sessionBase.includes("?") ? "&" : "?"}username=${encodeURIComponent(username)}`
   : null;
 const bot = createCompatibleBot({
   // ARENA_MINECRAFT_* are the older names, still read.
@@ -100,7 +102,7 @@ bot.once("spawn", async () => {
       } catch (error) {
         sessionFailure = error;
       }
-      const pollMs = Number(process.env.ARENA_SESSION_POLL_MS ?? 1000);
+      const pollMs = Number(setting("SESSION_POLL_MS") ?? 1000);
       setInterval(async () => {
         try {
           const previous = session;
@@ -124,9 +126,9 @@ bot.once("spawn", async () => {
     }
     runner = await startRunner({
       bot,
-      socketPath: required("ARENA_RUN_SOCKET"),
+      socketPath: setting("RUN_SOCKET") ?? required("MF_RUN_SOCKET"),
       readSession: async () => session ?? readSession(),
-      cancellationGraceMs: Number(process.env.ARENA_CANCEL_GRACE_MS ?? 5000),
+      cancellationGraceMs: Number(setting("CANCEL_GRACE_MS") ?? 5000),
     });
     // Lifecycle events for the supervisor, independent of any default script.
     let dimension = bot.game?.dimension;

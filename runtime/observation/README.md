@@ -113,7 +113,7 @@ The watchdog inside your own programs (`observation/watchdog.mjs`, see the main 
 
 ## Changing the observer
 
-`observer.json` in the working directory (or `ARENA_OBSERVER_CONFIG`) is read when the observer starts; restart it after editing (`mf cancel` its task, then `mf run --keep $MF_TOOLKIT_ROOT/runtime/default-scripts/observer.mjs`).
+`observer.json` in the working directory (or `MF_OBSERVER_CONFIG`) is read when the observer starts; restart it after editing (`mf cancel` its task, then `mf run --keep $MF_TOOLKIT_ROOT/runtime/default-scripts/observer.mjs`).
 
 ```json
 {

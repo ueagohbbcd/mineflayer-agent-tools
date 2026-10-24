@@ -32,8 +32,13 @@
  * and stops count as given only after the caller confirms it read the
  * result. A caller that disconnects first leaves them queued for the next
  * result: they may repeat, but are not lost.
+ *
+ * Every result whose reports count as given is also appended to
+ * `inbox.jsonl` in the state directory, one JSON line each, so what the
+ * agent was told can be read after the game (the file moves to
+ * `inbox.1.jsonl` past MF_INBOX_LOG_BYTES, 20 MB).
  */
-import { existsSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { basename, isAbsolute, join, resolve } from "node:path";
@@ -130,6 +135,7 @@ export async function startSupervisor({
   // A character's process that sends no heartbeat for this long is killed
   // and restarted (MF_HOST_UNRESPONSIVE_SECONDS; 0 turns it off).
   unresponsiveMs = Number(env.MF_HOST_UNRESPONSIVE_SECONDS ?? 20) * 1000,
+  inboxLogBytes = Number(env.MF_INBOX_LOG_BYTES ?? 20_000_000),
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
   for (const name of defaultScripts)
@@ -206,7 +212,7 @@ export async function startSupervisor({
   const tasks = new TaskManager({
     inbox,
     cwd,
-    env: { ...inboxEnv, ...hosts.env, ARENA_TASK_DIR: taskDir },
+    env: { ...inboxEnv, ...hosts.env, MF_TASK_DIR: taskDir },
     logDir: taskDir,
     killGraceMs,
   });
@@ -411,6 +417,22 @@ export async function startSupervisor({
     if (retry) scheduleIdle(c, retry);
   }
 
+  const inboxLog = join(stateDir, "inbox.jsonl");
+  /** Append what was given to inbox.jsonl; a failed write is logged, not fatal. */
+  function journal(response) {
+    try {
+      if (existsSync(inboxLog) && statSync(inboxLog).size > inboxLogBytes)
+        renameSync(inboxLog, join(stateDir, "inbox.1.jsonl"));
+      const { status, reports, moreReports, droppedReports } = response;
+      appendFileSync(
+        inboxLog,
+        `${JSON.stringify({ at: new Date().toISOString(), status, reports, moreReports, droppedReports })}\n`,
+      );
+    } catch (error) {
+      log(`inbox log: ${error.message}`);
+    }
+  }
+
   /**
    * The result plus what it can carry: every unread stop and as many
    * reports as fit in the budget. `commit` marks exactly those reports as
@@ -456,6 +478,7 @@ export async function startSupervisor({
     };
     const commit = () => {
       inbox.commit(batch);
+      if (response.reports.length) journal(response);
       // Kept for `mf inbox --again`, for output the caller lost.
       if (response.reports.length) lastBatch = { status: "inbox", reports: response.reports };
     };

@@ -17,17 +17,21 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { setting } from "../env.mjs";
 
 /** The run socket of `bot` (default: the main character). */
 export function runSocket(bot, env = process.env) {
   if (!bot) {
-    if (!env.ARENA_RUN_SOCKET)
+    const socket = setting("RUN_SOCKET", env);
+    if (!socket)
       throw new Error(
-        "No run socket (ARENA_RUN_SOCKET is unset): start the characters with `mf start`",
+        "No run socket (MF_RUN_SOCKET is unset): start the characters with `mf start`",
       );
-    return env.ARENA_RUN_SOCKET;
+    return socket;
   }
-  const { bots = [] } = JSON.parse(readFileSync(env.ARENA_BOTS_FILE, "utf8"));
+  const { bots = [] } = JSON.parse(
+    readFileSync(setting("BOTS_FILE", env), "utf8"),
+  );
   const entry = bots.find((b) => b.name === bot);
   if (!entry)
     throw new Error(
@@ -38,9 +42,10 @@ export function runSocket(bot, env = process.env) {
 
 /** Supervisor PID for the host selected by a run socket, if available. */
 export function runHostPid(socketPath, env = process.env) {
-  if (!env.ARENA_BOTS_FILE) return undefined;
+  const botsFile = setting("BOTS_FILE", env);
+  if (!botsFile) return undefined;
   try {
-    const { bots = [] } = JSON.parse(readFileSync(env.ARENA_BOTS_FILE, "utf8"));
+    const { bots = [] } = JSON.parse(readFileSync(botsFile, "utf8"));
     const lookupSocket =
       typeof socketPath === "string"
         ? socketPath
@@ -57,7 +62,7 @@ export function runHostPid(socketPath, env = process.env) {
     const variables = readFileSync(`/proc/${entry.pid}/environ`, "utf8").split(
       "\0",
     );
-    return variables.includes(`ARENA_BOT_HOST_GENERATION=${entry.generation}`)
+    return variables.includes(`MF_HOST_GENERATION=${entry.generation}`)
       ? entry.pid
       : undefined;
   } catch {
@@ -69,7 +74,7 @@ export function runHostPid(socketPath, env = process.env) {
 export const runEnv = (env) =>
   Object.fromEntries(
     Object.entries(env).filter(([key]) =>
-      /^(?:MC_INBOX_|ARENA_TASK_)/.test(key),
+      /^(?:MC_INBOX_|MF_TASK_|ARENA_TASK_)/.test(key),
     ),
   );
 

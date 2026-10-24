@@ -312,8 +312,8 @@ test("bot hosts: one native process and run socket per character", async (t) => 
     runDir: "/tmp/r",
   });
   assert.equal(one.MF_USERNAME, "arena_red1");
-  assert.equal(one.ARENA_RUN_SOCKET, runSocketPath);
-  assert.equal(one.ARENA_BOT_INDEX, "1");
+  assert.equal(one.MF_RUN_SOCKET, runSocketPath);
+  assert.equal(one.MF_BOT_INDEX, "1");
   assert.equal(one.BRIDGE_URL, undefined);
   assert.equal(one.BRIDGE_TOKEN, undefined);
 
@@ -337,7 +337,7 @@ test("bot hosts: one native process and run socket per character", async (t) => 
   });
   t.after(() => hosts.close());
   assert.deepEqual(started, ["arena_red1", "arena_red2"]);
-  assert.equal(hosts.env.ARENA_RUN_SOCKET, join(dir, "run", "arena_red1.sock"));
+  assert.equal(hosts.env.MF_RUN_SOCKET, join(dir, "run", "arena_red1.sock"));
   assert.equal(hosts.env.ARENA_BRIDGE_URL, undefined);
   assert.equal(hosts.env.ARENA_BRIDGE_TOKEN, undefined);
   assert.equal(
@@ -348,7 +348,7 @@ test("bot hosts: one native process and run socket per character", async (t) => 
     JSON.parse(
       await (
         await import("node:fs/promises")
-      ).readFile(hosts.env.ARENA_BOTS_FILE, "utf8"),
+      ).readFile(hosts.env.MF_BOTS_FILE, "utf8"),
     ),
     {
       bots: [
@@ -367,8 +367,8 @@ test("a run sees its own task's inbox identity in process.env", async (t) => {
   const { run } = await setup(t);
   const { runEnv } = await import("../../runtime/host/run.mjs");
   assert.deepEqual(
-    runEnv({ MC_INBOX_TASK_ID: "t1", ARENA_TASK_LOG_DIR: "/l", SECRET: "x" }),
-    { MC_INBOX_TASK_ID: "t1", ARENA_TASK_LOG_DIR: "/l" },
+    runEnv({ MC_INBOX_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l", SECRET: "x" }),
+    { MC_INBOX_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l" },
   );
   const before = process.env.MC_INBOX_TASK_ID;
   process.env.MC_INBOX_TASK_ID = "outer";
@@ -481,4 +481,28 @@ test("a run started read-only leaves movement alone", async (t) => {
   });
   assert.equal(code, 0);
   assert.deepEqual(bot.calls, []);
+});
+
+test("world memory settings: MF_ names, older ARENA_ names still read", async () => {
+  const { worldMemoryOptions } =
+    await import("../../runtime/host/world-memory.mjs");
+  assert.equal(worldMemoryOptions({}, "a"), null);
+  const mf = worldMemoryOptions(
+    { MF_WORLD_MEMORY_DIR: "/m", MF_WORLD_ID: "w" },
+    "a",
+  );
+  assert.equal(mf.directory, "/m");
+  assert.equal(JSON.parse(mf.worldId).worldId, "w");
+  const old = worldMemoryOptions({ ARENA_WORLD_MEMORY_DIR: "/o" }, "a");
+  assert.equal(old.directory, "/o");
+  assert.equal(
+    worldMemoryOptions(
+      {
+        MF_WORLD_MEMORY_MODE: "session",
+        ARENA_WORLD_MEMORY_MODE: "persistent",
+      },
+      "a",
+    ).directory,
+    undefined,
+  );
 });

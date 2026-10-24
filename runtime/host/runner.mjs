@@ -184,7 +184,8 @@ export async function startRunner({
       env: Object.fromEntries(
         Object.entries(request.env ?? {}).filter(
           ([key, value]) =>
-            /^(?:MC_INBOX_|ARENA_TASK_)/.test(key) && typeof value === "string",
+            /^(?:MC_INBOX_|MF_TASK_|ARENA_TASK_)/.test(key) &&
+            typeof value === "string",
         ),
       ),
       finished: false,
