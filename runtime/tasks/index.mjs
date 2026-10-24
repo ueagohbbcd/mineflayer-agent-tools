@@ -13,7 +13,10 @@ import { join } from "node:path";
 /** Child lifetime belongs to this manager. Releasing a waiter never kills a child. */
 export class TaskManager {
   constructor({
-    // Called with a task that ended while nobody waited for it.
+    // Called with a task that ended while nobody waited for it, and
+    // `delivered(channel)`, to call once its end has reached the caller. It
+    // may return a function that withdraws the notice: a wait that claims the
+    // task first calls it.
     onUnwatchedEnd = () => {},
     cwd = process.cwd(),
     env = {},
@@ -171,9 +174,15 @@ export class TaskManager {
       try {
         // A live waiter shows the end itself.
         if (!task.waiters.size) {
-          task.delivered = true;
-          task.channel = "log";
-          this.onUnwatchedEnd(task);
+          const withdraw = this.onUnwatchedEnd(task, {
+            delivered: (channel) => {
+              task.delivered = true;
+              task.channel = channel;
+              task.withdraw = undefined;
+            },
+          });
+          if (typeof withdraw === "function" && !task.delivered)
+            task.withdraw = withdraw;
         }
       } catch (error) {
         task.notificationError = error.message;
@@ -329,6 +338,8 @@ export class TaskManager {
       };
     task.delivered = true;
     task.channel = "wait";
+    task.withdraw?.();
+    task.withdraw = undefined;
     return this.snapshot(task);
   }
   /**

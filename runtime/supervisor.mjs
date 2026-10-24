@@ -208,7 +208,9 @@ export async function startSupervisor({
   const mainBot = hosts.bots[0].name;
   const taskDir = join(stateDir, "tasks");
   const tasks = new TaskManager({
-    onUnwatchedEnd: (task) => {
+    onUnwatchedEnd: (task, { delivered }) => {
+      // The log is where an unwatched end is read.
+      delivered("log");
       if (task.quiet) return;
       const tail = (buffer) => {
         const text = buffer.toString("utf8");
