@@ -27,6 +27,17 @@ bot's `position` where it applies.
 
 ## Options
 
+The default long-running watchdog (`runtime/default-scripts/watchdog.mjs`)
+uses a separate trend detector. Its `against_wall` warning counts **20 s of
+observed wall contact within a sliding 30 s window**, even if movement keys
+are briefly released. Only samples at most 2 s apart count as contact; an
+unobserved interval is not presumed to be wall contact. It reports once while
+the threshold stays met and re-arms after enough contact ages out. Override
+`wallMs`, `wallWindowMs`, or `wallMaxSampleGapMs` in `createTrendWatch`.
+
+The per-program `watchdog(bot, ...)` below is a separate, shorter-horizon
+helper and retains its own `stuckMs` semantics.
+
 | Option           | Default  | Meaning                                                                                      |
 | ---------------- | -------- | -------------------------------------------------------------------------------------------- |
 | `report`         | required | Called with each finding. Errors it throws are ignored.                                      |
