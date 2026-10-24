@@ -1,0 +1,1 @@
+**Looking at the world** ([mineflayer-surroundings](references/mineflayer-surroundings.md)): the bot knows only the chunks the server sent, and unknown is not air. Read blocks live first, with history only for unloaded chunks. Entities, players and signs, pictures when shape matters, one tree's logs, and the radar and explore background modules.

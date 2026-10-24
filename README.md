@@ -24,9 +24,13 @@ operate without any history collection.
 
 See [project scope](docs/project-scope.md).
 
-To let an agent play Minecraft through Mineflayer, give it the
-[`mineflayer-agent` skill](skills/mineflayer-agent/SKILL.md): setup, how to write
-control programs, and guides for moving, looking, items and survival. It runs
+To let an agent play Minecraft through Mineflayer, give it the skills in
+[`skills/`](skills/): [`mf-basics`](skills/mf-basics/SKILL.md) first (running
+the character and programs with `mf`, the log, the work loop, the examples),
+and the peer `mineflayer-*` skills for writing programs and setup, moving,
+looking, items and survival. To give it one skill instead, use the bundle
+[`bundle/mineflayer-agent`](bundle/mineflayer-agent/SKILL.md), built from the
+same files (`npm run build:bundle`). It runs
 programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
 `mf run program.mjs` runs a program on the character (in the background of
 your own tool for long ones) and `mf log` shows what happened in the game.
@@ -166,7 +170,7 @@ services should serialize it or wrap getters rather than expose mutation.
 
 ## Example programs
 
-`examples/*.mjs` are short `mf` modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z`) or copy and change them. The list is in [the skill](skills/mineflayer-agent/SKILL.md#example-programs). They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
+`examples/*.mjs` are short `mf` modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z`) or copy and change them. The list is in [`mf-basics`](skills/mf-basics/SKILL.md#example-programs); each `mineflayer-*` skill links the ones on its subject. They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
 
 ## Tests
 

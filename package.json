@@ -17,6 +17,7 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\" \"test/**/*.test.mjs\"",
+    "build:bundle": "node scripts/build-bundle.mjs",
     "test:visual": "python3 -m unittest discover -s test -p \"visual_*_test.py\""
   },
   "dependencies": {
@@ -47,6 +48,7 @@
     "renderers/requirements.txt",
     "docs/*.md",
     "skills/**/*.md",
+    "bundle/**/*.md",
     "README.md",
     "LICENSE",
     "examples/*.js",

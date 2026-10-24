@@ -67,10 +67,19 @@ later, separate breaking change.
 ## Division of work with Craft Arena
 
 - This repository ships libraries, small proven tools, prompts and guides. The
-  guides are packed into one main skill,
-  [`skills/mineflayer-agent`](../skills/mineflayer-agent/SKILL.md), for "drop
-  into any agent and play Minecraft", including short Mineflayer install/join
-  notes; unit guides are references inside it, not separately installed skills.
+  guides are a set of skills in [`skills/`](../skills/) to drop into any agent
+  together: [`mf-basics`](../skills/mf-basics/SKILL.md) is the top one (running
+  the character and programs with `mf`, the log, the work loop, the examples)
+  and the peer `mineflayer-*` skills each cover one subject (programs and
+  setup without `mf`, navigation, surroundings, items, survival). Background
+  modules get a line in `mf-basics` and in the skill of their subject.
+- One bundle skill, [`bundle/mineflayer-agent`](../bundle/mineflayer-agent/SKILL.md),
+  holds all of them for an agent that should get only one: `mf-basics` is its
+  SKILL.md, the others are its references, and each skill's `intro.md` is its
+  paragraph there. `scripts/build-bundle.mjs` (`npm run build:bundle`) writes
+  it and a test checks it matches. Take either the bundle or the separate
+  skills, not both; to compose your own main skill, use the `intro.md`
+  paragraphs.
 - Craft Arena depends on the libraries only, through a pinned commit tarball. It
   does not install this repository's skills: it copies the parts it needs and
   rewrites them as its own smaller skills for the match rules.

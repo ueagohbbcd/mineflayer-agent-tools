@@ -1,0 +1,1 @@
+**Items and containers** ([mineflayer-items](references/mineflayer-items.md)): dig with the right tool, place against a face with no entity in the cell, and equip again each time work resumes. Craft with the right number of runs. Take only what you need from a chest, using the numeric item type.

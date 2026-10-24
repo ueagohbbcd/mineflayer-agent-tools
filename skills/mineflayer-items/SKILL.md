@@ -1,3 +1,8 @@
+---
+name: mineflayer-items
+description: "Using items and blocks with a Mineflayer bot: digging, placing, equipping, crafting with the right number of runs, furnaces and other windows, and taking only what you need from chests. Use for any work with the hand or the inventory."
+---
+
 # Items, blocks and containers
 
 - **Dig:** `await bot.dig(block)`. Check `bot.canDigBlock(block)` and equip a suitable tool first (`bot.pathfinder.bestHarvestTool(block)` when Pathfinder is loaded). Check below before digging down.
@@ -14,3 +19,8 @@
 4. `window.close()` when done.
 
 If you look in one program and take in the next, check that `bot.currentWindow` is still that chest; open it again if it closed.
+
+## Examples
+
+- [build-with-autoeat.mjs](../../examples/build-with-autoeat.mjs): placing a planned list of blocks, eating between steps.
+- [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs): checking that no entity blocks a placement (read-only).

@@ -1,0 +1,1 @@
+**Staying alive** ([mineflayer-survival](references/mineflayer-survival.md)): eat before health drops, fight with PvP, and defend while walking. Get out of water and check below before digging. Use a bed only in the overworld. Under `mf`, the danger module and idle help.

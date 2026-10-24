@@ -1,7 +1,7 @@
 /**
  * A place graph: which of your waypoints connect and how, found with
  * Pathfinder's own search. For looking up only: nothing moves. To go
- * somewhere, use Pathfinder (see the navigation guide in skills/mineflayer-agent).
+ * somewhere, use Pathfinder (see the skill skills/mineflayer-navigation).
  *
  *   mf run "$MF_TOOLKIT_ROOT/examples/place-graph.mjs" [--file waypoints.json]
  *     [--here] [--from NAME] [--only NAME,NAME,...] [--blocks N]
