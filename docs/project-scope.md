@@ -37,6 +37,24 @@ while no program controls the character; behaviour while a program runs
 Arena rules, teams, Pi, trusted messages and match scheduling remain outside
 this repository.
 
+## Messages from outside the game
+
+Someone outside the game reaches the model in one of two ways, and both end
+in the harness's own input:
+
+- Direct: the person using the agent types to it through the harness (its chat
+  box, CLI prompt or RPC `prompt`). This is the normal path when you play with
+  the toolkit yourself on your own machine, and it needs nothing from this
+  repository.
+- Automated: a trusted system (a match server, an operator's script) turns its
+  state into harness input through an adapter the caller writes, as Craft
+  Arena's Pi extension does with its platform messages. That adapter belongs
+  to the caller.
+
+The runtime carries neither. Game chat is game data (`trusted: false`),
+whoever wrote it. The report queue cannot carry trust either: its socket is
+open to the model's own programs. Do not add a trusted-message path to `mf`.
+
 Repository name: `mineflayer-agent-tools` (renamed from `mineflayer-world-memory`).
 The package/import name stays `mineflayer-world-memory` for now, for backward
 compatibility: renaming the GitHub repository does not rename the Node package
