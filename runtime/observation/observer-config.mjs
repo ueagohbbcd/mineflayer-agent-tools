@@ -1,14 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setting } from "../env.mjs";
 
 /**
  * Optional workspace observer.json: { intervalMs?, radar?, recentBlocks?, events?, report? } for the default
- * observer. ARENA_OBSERVER_CONFIG names another file.
+ * observer. MF_OBSERVER_CONFIG names another file.
  */
 export async function readObserverConfig(cwd, env = process.env) {
-  const candidates = env.ARENA_OBSERVER_CONFIG
-    ? [env.ARENA_OBSERVER_CONFIG]
-    : [join(cwd, "observer.json")];
+  const named = setting("OBSERVER_CONFIG", env);
+  const candidates = named ? [named] : [join(cwd, "observer.json")];
   for (const path of candidates) {
     let text;
     try {

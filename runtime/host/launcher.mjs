@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { socketPath } from "../socket-path.mjs";
+import { setting } from "../env.mjs";
 
 const hostCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -24,12 +25,12 @@ export function hostEnv(env, { name, runSocket, index, runDir }) {
     MF_USERNAME: name,
     // Set only inside the character's own process (InboxClient reads it).
     MF_CHARACTER: name,
-    ARENA_RUN_SOCKET: runSocket,
-    ARENA_BOT_INDEX: String(index),
+    MF_RUN_SOCKET: runSocket,
+    MF_BOT_INDEX: String(index),
     // Do not create a history cache by default. Persist only when opted in.
-    ...(env.ARENA_WORLD_MEMORY_MODE === "persistent" &&
-    !env.ARENA_WORLD_MEMORY_DIR
-      ? { ARENA_WORLD_MEMORY_DIR: join(runDir, "world-memory", name) }
+    ...(setting("WORLD_MEMORY_MODE", env) === "persistent" &&
+    !setting("WORLD_MEMORY_DIR", env)
+      ? { MF_WORLD_MEMORY_DIR: join(runDir, "world-memory", name) }
       : {}),
   };
 }
@@ -85,7 +86,7 @@ export async function startBotHosts({
   const start = (host) => {
     if (closed) return;
     host.generation = randomUUID();
-    host.environment.ARENA_BOT_HOST_GENERATION = host.generation;
+    host.environment.MF_HOST_GENERATION = host.generation;
     const child = spawnHost(host.environment);
     const startedAt = Date.now();
     host.pid = child.pid;
@@ -124,9 +125,9 @@ export async function startBotHosts({
   return {
     bots,
     env: {
-      ARENA_BOT: main.name,
-      ARENA_BOTS_FILE: botsFile,
-      ARENA_RUN_SOCKET: main.runSocket,
+      MF_BOT: main.name,
+      MF_BOTS_FILE: botsFile,
+      MF_RUN_SOCKET: main.runSocket,
     },
     close() {
       closed = true;

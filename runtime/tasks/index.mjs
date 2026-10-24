@@ -130,7 +130,7 @@ export class TaskManager {
           ...this.env,
           ...env,
           MC_INBOX_TASK_ID: id,
-          ...(task.logDir ? { ARENA_TASK_LOG_DIR: task.logDir } : {}),
+          ...(task.logDir ? { MF_TASK_LOG_DIR: task.logDir } : {}),
         },
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
