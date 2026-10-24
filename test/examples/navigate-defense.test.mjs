@@ -66,12 +66,9 @@ function fixture({ hasTarget = true } = {}) {
     },
   };
   const messages = [];
-  const inbox = {
-    async post(data) {
-      messages.push({ kind: "post", data });
-    },
-    async upsert(key, data) {
-      messages.push({ kind: "upsert", key, data });
+  const reporter = {
+    async post(data, { key } = {}) {
+      messages.push(key ? { kind: "upsert", key, data } : { kind: "post", data });
     },
   };
   const state = () => ({
@@ -81,12 +78,12 @@ function fixture({ hasTarget = true } = {}) {
       entries: hasTarget ? [{ id: 2, name: "zombie", distance: 2 }] : [],
     },
   });
-  return { bot, goal, goals, inbox, messages, state, target };
+  return { bot, goal, goals, reporter, messages, state, target };
 }
 
 test("native defense pauses at a stopped route, reports evidence, then restores the same goal", async () => {
   const f = fixture();
-  const result = await navigateWithDefense(f.bot, f.inbox, f.goal, {
+  const result = await navigateWithDefense(f.bot, f.reporter, f.goal, {
     observe: f.state,
     pause: async () => {
       delete f.bot.entities[f.target.id];
@@ -105,7 +102,7 @@ test("native defense pauses at a stopped route, reports evidence, then restores 
 
 test("native bot disconnect cancels defense without restoring the route", async () => {
   const f = fixture({ hasTarget: false });
-  const running = navigateWithDefense(f.bot, f.inbox, f.goal, {
+  const running = navigateWithDefense(f.bot, f.reporter, f.goal, {
     observe: f.state,
   });
   f.bot.emit("end", "connection lost");

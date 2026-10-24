@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { navigateWithAutoeat } from "../../examples/navigate-with-autoeat.mjs";
-import { Inbox } from "../../runtime/inbox/index.mjs";
 const require = createRequire(import.meta.url);
 const nativeGoto = require("mineflayer-pathfinder/lib/goto.js");
 const { Vec3 } = require("vec3");
@@ -15,7 +14,13 @@ async function until(predicate) {
 // Use installed native goto's events/rejections. Movement/food server updates
 // below are explicit timeline fixtures, not simulated successful MC gameplay.
 function fixture() {
-  const queue = new Inbox({ sessionId: "navigation" }),
+  // What the program reported, in order.
+  const queue = {
+      messages: [],
+      drain() {
+        return { messages: this.messages.splice(0) };
+      },
+    },
     trace = [],
     goals = [];
   let mining = false,
@@ -68,16 +73,16 @@ function fixture() {
     isMining: () => mining,
     isBuilding: () => building,
   };
-  const inbox = {
+  const reporter = {
     async post(data) {
       trace.push("report");
-      return queue.post({ sessionId: queue.sessionId, data, kind: "event" });
+      queue.messages.push({ data });
     },
   };
   const goal = { isEnd: (p) => p.x === 10 };
   return {
     bot,
-    inbox,
+    reporter,
     queue,
     trace,
     goals,
@@ -115,7 +120,7 @@ function fixture() {
 test("pause waits for native PathStopped, landing and block work; food report records actual goal restoration", async () => {
   const f = fixture();
   f.setBusy(true, true, false);
-  const result = navigateWithAutoeat(f.bot, f.inbox, f.goal);
+  const result = navigateWithAutoeat(f.bot, f.reporter, f.goal);
   assert.deepEqual(f.trace.slice(0, 2), ["goto", "stop_requested"]);
   await turn();
   assert.equal(f.trace.includes("equip"), false);
@@ -133,7 +138,6 @@ test("pause waits for native PathStopped, landing and block work; food report re
   assert.equal(f.using(), false);
   const reports = f.queue.drain().messages;
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].priority, "normal");
   assert.equal(reports[0].data.resume.status, "resumed");
   assert.equal(reports[0].data.before.food, 10);
   assert.equal(reports[0].data.after.food, 16);
@@ -153,7 +157,7 @@ for (const interruption of ["abort", "death", "end"])
   test(`${interruption} during native consume releases use and never resumes on late completion`, async () => {
     const f = fixture(),
       controller = new AbortController();
-    const result = navigateWithAutoeat(f.bot, f.inbox, f.goal, {
+    const result = navigateWithAutoeat(f.bot, f.reporter, f.goal, {
       signal: controller.signal,
     });
     f.stopped();
@@ -175,7 +179,7 @@ for (const interruption of ["abort", "death", "end"])
 test("cancellation before a safe landing removes tick wait and records stopped meal", async () => {
   const f = fixture(),
     controller = new AbortController();
-  const result = navigateWithAutoeat(f.bot, f.inbox, f.goal, {
+  const result = navigateWithAutoeat(f.bot, f.reporter, f.goal, {
     signal: controller.signal,
   });
   f.stopped(false);
@@ -188,7 +192,7 @@ test("cancellation before a safe landing removes tick wait and records stopped m
 });
 test("native consume error reports failure and does not restart navigation", async () => {
   const f = fixture(),
-    result = navigateWithAutoeat(f.bot, f.inbox, f.goal);
+    result = navigateWithAutoeat(f.bot, f.reporter, f.goal);
   f.stopped();
   await until(() => f.trace.includes("consume"));
   f.eating.reject(new Error("Food is full"));
@@ -200,7 +204,7 @@ test("native consume error reports failure and does not restart navigation", asy
 });
 test("unconfirmed native completion is reported without an immediate repeated meal loop", async () => {
   const f = fixture(),
-    result = navigateWithAutoeat(f.bot, f.inbox, f.goal);
+    result = navigateWithAutoeat(f.bot, f.reporter, f.goal);
   f.stopped();
   await until(() => f.trace.includes("consume"));
   f.finishMeal({ changed: false });
@@ -210,10 +214,10 @@ test("unconfirmed native completion is reported without an immediate repeated me
   assert.equal(r.food.unconfirmed, 1);
   assert.equal(r.food.attempts, 1);
 });
-test("no-food report remains normal while navigation continues", async () => {
+test("no-food report is sent once while navigation continues", async () => {
   const f = fixture();
   f.bot.inventory.items = () => [];
-  const result = navigateWithAutoeat(f.bot, f.inbox, f.goal);
+  const result = navigateWithAutoeat(f.bot, f.reporter, f.goal);
   f.bot.emit("health");
   f.bot.emit("health");
   f.arrive();
@@ -222,16 +226,15 @@ test("no-food report remains normal while navigation continues", async () => {
   assert.equal(r.food.attempts, 0);
   const messages = f.queue.drain().messages;
   assert.equal(messages.length, 1);
-  assert.equal(messages[0].priority, "normal");
 });
 test("reporting failure stays visible in final result without retrying or disrupting resumed route", async () => {
   const f = fixture();
   let sends = 0;
-  f.inbox.post = async () => {
+  f.reporter.post = async () => {
     sends++;
     throw new Error("delivery failed");
   };
-  const result = navigateWithAutoeat(f.bot, f.inbox, f.goal);
+  const result = navigateWithAutoeat(f.bot, f.reporter, f.goal);
   f.stopped();
   await until(() => f.trace.includes("consume"));
   f.finishMeal();

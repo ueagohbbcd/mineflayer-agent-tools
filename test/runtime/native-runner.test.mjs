@@ -363,24 +363,46 @@ test("bot hosts: one native process and run socket per character", async (t) => 
   assert.deepEqual(started, ["arena_red1", "arena_red2", "arena_red1"]);
 });
 
-test("a run sees its own task's inbox identity in process.env", async (t) => {
+test("a run sees its own task's log identity in process.env", async (t) => {
   const { run } = await setup(t);
   const { runEnv } = await import("../../runtime/host/run.mjs");
   assert.deepEqual(
-    runEnv({ MC_INBOX_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l", SECRET: "x" }),
-    { MC_INBOX_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l" },
+    runEnv({ MF_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l", MF_LOG_SOCKET: "/s", SECRET: "x" }),
+    { MF_TASK_ID: "t1", MF_TASK_LOG_DIR: "/l", MF_LOG_SOCKET: "/s" },
   );
-  const before = process.env.MC_INBOX_TASK_ID;
-  process.env.MC_INBOX_TASK_ID = "outer";
+  const before = process.env.MF_TASK_ID;
+  process.env.MF_TASK_ID = "outer";
   t.after(() => {
-    if (before === undefined) delete process.env.MC_INBOX_TASK_ID;
-    else process.env.MC_INBOX_TASK_ID = before;
+    if (before === undefined) delete process.env.MF_TASK_ID;
+    else process.env.MF_TASK_ID = before;
   });
   const result = await run(
-    `export default async () => process.env.MC_INBOX_TASK_ID;`,
+    `export default async () => process.env.MF_TASK_ID;`,
   );
-  // runModule sends this process's MC_INBOX_TASK_ID ("outer") as the run's.
+  // runModule sends this process's MF_TASK_ID ("outer") as the run's.
   assert.match(result.stdout, /"outer"/);
+});
+
+test("a controlling run gets the watchdog: findings in its own output; it can be turned off", async (t) => {
+  const { bot, run } = await setup(t);
+  const { Vec3 } = require("vec3");
+  bot.entity = { position: new Vec3(0, 64, 0), isCollidedHorizontally: true };
+  const pushing = `
+    export default async function (bot, { watchdog }) {
+      console.log("has watchdog", typeof watchdog?.failure);
+      bot.setControlState("forward", true);
+      bot.entity.position = bot.entity.position.clone();
+      await new Promise((done) => setTimeout(done, 300));
+    }`;
+  const watched = await run(`export const watchdog = { stuckMs: 100, checkMs: 20 };${pushing}`);
+  assert.equal(watched.code, 0, watched.stderr);
+  assert.match(watched.stdout, /has watchdog function/);
+  assert.match(watched.stdout, /\[watchdog\] Trying to move \(forward\) but moved less than 1 block in 0 s, pressed against a wall\./);
+  const off = await run(`export const watchdog = false;${pushing}`);
+  assert.match(off.stdout, /has watchdog undefined/);
+  assert.doesNotMatch(off.stdout, /\[watchdog\]/);
+  const readOnly = await run(`export const control = false; export const watchdog = { stuckMs: 100, checkMs: 20 };${pushing}`);
+  assert.doesNotMatch(readOnly.stdout, /\[watchdog\]/);
 });
 
 test("cancellation hard-terminates a host when a module ignores AbortSignal", async (t) => {

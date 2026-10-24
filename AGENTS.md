@@ -5,7 +5,7 @@ For contributors to this repository. Agents that play through it read `skills/mi
 ## Two layers
 
 - **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `runtime/`, never touch a report queue, and take a callback for anything they report.
-- **Runtime** (`runtime/`, the `mf` command): character processes, one controlling program per character, the report queue (`mf inbox`), default modules, idle. Telling a model when a background command ends is the harness's job, not the runtime's.
+- **Runtime** (`runtime/`, the `mf` command): character processes, one controlling program per character, the log (`mf log`), default and background modules, idle. Telling a model when a background command ends is the harness's job, not the runtime's.
 
 Example programs (`examples/*.mjs`) sit on top of both: short `mf` modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique; two examples that do similar things in different ways stay separate. Their tests are in `test/examples/`.
 

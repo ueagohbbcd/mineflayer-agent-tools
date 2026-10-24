@@ -13,7 +13,8 @@ import { join } from "node:path";
 /** Child lifetime belongs to this manager. Releasing a waiter never kills a child. */
 export class TaskManager {
   constructor({
-    inbox,
+    // Called with a task that ended while nobody waited for it.
+    onUnwatchedEnd = () => {},
     cwd = process.cwd(),
     env = {},
     maxTasks = 128,
@@ -27,7 +28,6 @@ export class TaskManager {
     maxLogBytes = 256 * 1024 * 1024,
     now = Date.now,
   } = {}) {
-    if (!inbox) throw new Error("inbox required");
     if (
       !Number.isInteger(maxTasks) ||
       maxTasks < 1 ||
@@ -40,7 +40,7 @@ export class TaskManager {
     )
       throw new Error("Invalid task limits");
     Object.assign(this, {
-      inbox,
+      onUnwatchedEnd,
       cwd,
       env,
       maxTasks,
@@ -117,7 +117,6 @@ export class TaskManager {
       cwd,
       waiters: new Set(),
       delivered: false,
-      eventId: null,
     };
     this.tasks.set(id, task);
     if (callId) this.calls.set(callId, { id, command, createdAt: this.now() });
@@ -129,7 +128,7 @@ export class TaskManager {
           ...process.env,
           ...this.env,
           ...env,
-          MC_INBOX_TASK_ID: id,
+          MF_TASK_ID: id,
           ...(task.logDir ? { MF_TASK_LOG_DIR: task.logDir } : {}),
         },
         detached: process.platform !== "win32",
@@ -170,23 +169,11 @@ export class TaskManager {
       this.closeLogs(task);
       this.writeStatus(task);
       try {
-        // A live claiming waiter owns this completion; avoid evicting unrelated inbox data.
+        // A live waiter shows the end itself.
         if (!task.waiters.size) {
-          const posted = this.inbox.post(
-            {
-              sessionId: this.inbox.sessionId,
-              kind: "event",
-              data: { type: "task.completed", ...this.snapshot(task) },
-            },
-            {
-              source: "runtime",
-              onDelivered: () => {
-                task.delivered = true;
-                task.channel = "inbox";
-              },
-            },
-          );
-          task.eventId = posted.id;
+          task.delivered = true;
+          task.channel = "log";
+          this.onUnwatchedEnd(task);
         }
       } catch (error) {
         task.notificationError = error.message;
@@ -342,7 +329,6 @@ export class TaskManager {
       };
     task.delivered = true;
     task.channel = "wait";
-    if (task.eventId) this.inbox.remove(task.eventId);
     return this.snapshot(task);
   }
   /**

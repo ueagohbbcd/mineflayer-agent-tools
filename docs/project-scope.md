@@ -18,16 +18,17 @@ must explicitly handle older saved files, dimension/version separation,
 timestamps, and the async-storage vs synchronous-query contract.
 
 The runtime (`runtime/`, the `mf` command) lets any agent with a shell play
-through a real Mineflayer bot: the bot processes, a report queue, programs
-with logs, idle behaviour and default observers. Running programs in the
+through a real Mineflayer bot: the bot processes, a log that `mf log` reads
+and sums up, programs with their output, idle behaviour and optional
+background modules. Running programs in the
 background and telling the model when they end is left to the harness
 (see [runtime/README.md](../runtime/README.md)). It builds on the libraries;
 the libraries never import it.
 
 Inside the runtime, a small core does not depend on any replaceable part: the
 character processes and their liveness, one controlling program per
-character, cancellation and cleanup, and the record of what each result has
-given the caller. The default scripts (observer, chat, trend watchdog), idle
+character, cancellation and cleanup, stops, and the log. The modules (chat,
+danger, radar, explore, the background watchdog), idle
 and the routines in `examples/` are replaceable modules on top: turning one
 off or replacing it must not change who controls a character, how a death
 stops its program, or how a blocked process is recovered. Idle only acts
@@ -75,6 +76,6 @@ later, separate breaking change.
   rewrites them as its own smaller skills for the match rules.
 - Craft Arena can use the runtime for its participants instead of keeping its
   own copy.
-- Libraries never import an inbox, match clock or arena session. Reporting goes
+- Libraries never import the log, a match clock or an arena session. Reporting goes
   through a callback or object the caller passes in (for example
   `watchdog(bot, { report })`).

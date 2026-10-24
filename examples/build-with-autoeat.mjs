@@ -3,10 +3,13 @@
  * Plan: {"material":"cobblestone","steps":[{"against":{"x":0,"y":64,"z":0},"face":{"x":0,"y":1,"z":0}}]}
  * Plan positions must be reachable from the current location. Health events
  * trigger meals; a shared hand Promise serializes equip/place/use-item.
+ * Reports go through `reporter.post(data, { key, urgent })`: run as a program,
+ * meals are JSON lines in its own output and "no food" also goes to the log
+ * as urgent, which wakes the model while the build goes on.
  */
 import { readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { InboxClient } from "../runtime/inbox/index.mjs";
+import { LogClient } from "../runtime/log/index.mjs";
 import { Vec3 } from "vec3";
 
 const foods = new Set([
@@ -19,7 +22,7 @@ const foods = new Set([
 
 export async function buildWithAutoeat(
   bot,
-  inbox,
+  reporter,
   plan,
   { signal, pause = sleep, now = Date.now } = {},
 ) {
@@ -77,16 +80,16 @@ export async function buildWithAutoeat(
   async function reportFood(report) {
     food[report.outcome]++;
     pendingResume++;
-    // Keep the latest 16 meal reports for final stdout, including after Inbox expiry.
+    // Keep the latest 16 meal reports for the final result.
     food.recent.push(report);
     if (food.recent.length > 16) {
       food.recent.shift();
       food.omitted++;
     }
     try {
-      // post preserves each meal for the next tool boundary. Resume is still
-      // pending; the final result updates it when building takes the hand again.
-      await inbox.post(report);
+      // Resume is still pending; the final result updates it when building
+      // takes the hand again.
+      await reporter.post(report);
     } catch (error) {
       food.reportErrors++;
       report.deliveryError = error.message;
@@ -101,12 +104,15 @@ export async function buildWithAutoeat(
         if (!reportedNoFood) {
           reportedNoFood = true;
           food.noFoodWarnings++;
-          await inbox.requestJudgment({
-            reason: "No food available",
-            food: bot.food,
-            health: bot.health,
-            construction: "continues unless you cancel or change the program",
-          });
+          await reporter.post(
+            {
+              reason: "No food available",
+              food: bot.food,
+              health: bot.health,
+              construction: "continues unless you cancel or change the program",
+            },
+            { urgent: true },
+          );
         }
         return;
       }
@@ -194,10 +200,9 @@ export async function buildWithAutoeat(
       });
       placed++;
       checkAbort();
-      await inbox.upsert(
-        "build.progress",
+      await reporter.post(
         { placed, total: plan.steps.length },
-        { ttlMs: 30000 },
+        { key: "build.progress" },
       );
       // Health events also trigger this independently; no model polling.
       await checkFood();
@@ -223,8 +228,7 @@ export async function buildWithAutoeat(
         };
     }
   }
-  // Include cumulative outcomes in the original program's final stdout/result.
-  // Even a wait longer than the inbox's five-minute TTL retains these counts.
+  // Include cumulative outcomes in the program's final result.
   return {
     status,
     built: placed,
@@ -240,9 +244,17 @@ export default async function buildWithAutoeatProgram(
 ) {
   if (!args[0]) throw new Error("Pass a JSON placement plan");
   const plan = JSON.parse(await readFile(args[0], "utf8"));
-  const inbox = new InboxClient();
+  const urgent = new LogClient({ source: "build" });
+  // Meals and warnings as output lines; per-block progress (keyed) is left
+  // out; a warning that needs you also goes to the log as urgent.
+  const reporter = {
+    async post(data, { key, urgent: wake } = {}) {
+      if (!key) log(JSON.stringify(data));
+      if (wake) await urgent.post(data, { type: "warning", urgent: true });
+    },
+  };
   try {
-    const result = await buildWithAutoeat(bot, inbox, plan, { signal });
+    const result = await buildWithAutoeat(bot, reporter, plan, { signal });
     log(JSON.stringify(result));
     if (result.error) throw new Error(result.error);
   } finally {

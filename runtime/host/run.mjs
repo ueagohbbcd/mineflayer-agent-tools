@@ -70,11 +70,11 @@ export function runHostPid(socketPath, env = process.env) {
   }
 }
 
-/** What a run sees of this task's environment: its inbox identity and task files. */
+/** What a run sees of this task's environment: its task id, log and task files. */
 export const runEnv = (env) =>
   Object.fromEntries(
     Object.entries(env).filter(([key]) =>
-      /^(?:MC_INBOX_|MF_TASK_|ARENA_TASK_)/.test(key),
+      /^(?:MF_TASK_|MF_LOG_|ARENA_TASK_)/.test(key),
     ),
   );
 

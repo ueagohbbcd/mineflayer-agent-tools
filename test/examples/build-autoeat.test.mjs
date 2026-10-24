@@ -2,12 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { buildWithAutoeat } from "../../examples/build-with-autoeat.mjs";
-import { Inbox } from "../../runtime/inbox/index.mjs";
 
 function fixture({ steps = 2, noFood = false, consume = true } = {}) {
   let now = 0,
     usingItem = false;
-  const queue = new Inbox({ sessionId: "build", now: () => now });
+  // What the program reported, in order: { data, key?, urgent? }.
+  const queue = {
+    messages: [],
+    drain() {
+      return { messages: this.messages.splice(0) };
+    },
+  };
   const trace = [];
   const items = [
     ...(!noFood ? [{ name: "bread", count: 100, slot: 36 }] : []),
@@ -39,27 +44,11 @@ function fixture({ steps = 2, noFood = false, consume = true } = {}) {
       bot.emit("health");
     },
   });
-  const inbox = {
-    async post(data) {
-      trace.push("report");
-      return queue.post({ sessionId: queue.sessionId, data, kind: "event" });
-    },
-    async upsert(key, data, options) {
-      return queue.post({
-        sessionId: queue.sessionId,
-        data,
-        kind: "state",
-        key,
-        ...options,
-      });
-    },
-    async requestJudgment(data) {
-      return queue.post({
-        sessionId: queue.sessionId,
-        data,
-        kind: "judgment",
-        priority: "urgent",
-      });
+  const reporter = {
+    async post(data, { key, urgent } = {}) {
+      if (!key && !urgent) trace.push("report");
+      // A copy, as a real send serializes it.
+      queue.messages.push({ data: structuredClone(data), ...(key ? { key } : {}), ...(urgent ? { urgent } : {}) });
     },
   };
   const plan = {
@@ -83,7 +72,7 @@ function fixture({ steps = 2, noFood = false, consume = true } = {}) {
   };
   return {
     bot,
-    inbox,
+    reporter,
     queue,
     plan,
     options,
@@ -96,11 +85,9 @@ function fixture({ steps = 2, noFood = false, consume = true } = {}) {
 
 test("each short action has one normal history event and actual build handoff", async () => {
   const f = fixture();
-  let wakes = 0;
-  f.queue.on("urgent", () => wakes++);
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
-  // Drain only after the original run returns, like the outer tool boundary.
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   const batch = f.queue.drain();
+  const wakes = batch.messages.filter((m) => m.urgent).length;
   const actions = batch.messages.filter((m) => m.data.type === "food.action");
   assert.equal(result.status, "completed");
   assert.equal(result.built, 2);
@@ -115,7 +102,7 @@ test("each short action has one normal history event and actual build handoff", 
     [1, 2],
   );
   assert.ok(
-    actions.every((m) => m.kind === "event" && m.priority === "normal"),
+    actions.every((m) => !m.key && !m.urgent),
   );
   for (const { data } of actions) {
     assert.equal(data.reason, "food_below_14");
@@ -152,35 +139,9 @@ test("each short action has one normal history event and actual build handoff", 
   assert.equal(f.bot.listenerCount("health"), 0);
 });
 
-test("final result preserves action outcomes after a wait longer than inbox TTL", async () => {
-  const f = fixture();
-  const place = f.bot.placeBlock;
-  f.bot.placeBlock = async () => {
-    await place();
-    f.advance(300001); // No drain for longer than the real default five-minute TTL.
-  };
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
-  const batch = f.queue.drain();
-  assert.ok(batch.dropped.expired >= 2);
-  assert.equal(
-    batch.messages.filter((m) => m.data.type === "food.action").length,
-    0,
-  );
-  assert.equal(result.food.attempts, 2);
-  assert.equal(result.food.resumed, 2);
-  assert.deepEqual(
-    result.food.recent.map((r) => r.outcome),
-    ["observedChange", "observedChange"],
-  );
-  assert.deepEqual(
-    result.food.recent.map((r) => r.resume.nextStep),
-    [1, 2],
-  );
-});
-
 test("an unchanged food mirror reports an unconfirmed attempt rather than success", async () => {
   const f = fixture({ steps: 1, consume: false });
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.food.unconfirmed, 1);
   assert.equal(result.food.observedChange, 0);
   assert.equal(
@@ -194,7 +155,7 @@ test("failed background food action records its outcome and can hand back to con
   f.options.pause = async () => {
     throw new Error("use interrupted");
   };
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.status, "completed");
   assert.equal(result.built, 1);
   assert.equal(result.food.failed, 1);
@@ -209,8 +170,6 @@ test("failed background food action records its outcome and can hand back to con
     "equip:cobblestone",
     "place",
   ]);
-  f.advance(300001);
-  assert.equal(f.queue.drain().messages.length, 0);
   assert.equal(result.food.recent[0].outcome, "failed");
   assert.equal(result.food.recent[0].resume.status, "resumed");
 });
@@ -220,7 +179,7 @@ test("failed material reacquisition reports the meal but never claims build resu
   f.bot.equip = async (item) => {
     if (item.name === "cobblestone") throw new Error("material equip failed");
   };
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.status, "failed");
   assert.equal(result.food.observedChange, 1);
   assert.equal(result.food.resumed, 0);
@@ -232,7 +191,7 @@ test("cancellation while eating records cancellation and never resumes placement
   const controller = new AbortController();
   f.options.signal = controller.signal;
   f.options.pause = async () => controller.abort();
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.status, "cancelled");
   assert.equal(result.food.cancelled, 1);
   assert.equal(result.food.resumed, 0);
@@ -242,22 +201,23 @@ test("cancellation while eating records cancellation and never resumes placement
 
 test("no food requests one real judgment, while routine action reports never do", async () => {
   const f = fixture({ noFood: true });
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.status, "completed");
   assert.equal(result.food.attempts, 0);
   assert.equal(result.food.noFoodWarnings, 1);
   const batch = f.queue.drain();
-  assert.equal(batch.messages.filter((m) => m.priority === "urgent").length, 1);
+  assert.equal(batch.messages.filter((m) => m.urgent).length, 1);
 });
 
 test("IPC report failure is visible in the final result without retrying an uncertain send", async () => {
   const f = fixture({ steps: 1 });
   let sends = 0;
-  f.inbox.post = async () => {
+  f.reporter.post = async (data, { key } = {}) => {
+    if (key) return; // Progress goes through.
     sends++;
     throw new Error("response lost");
   };
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(sends, 1);
   assert.equal(result.status, "completed");
   assert.equal(result.food.reportErrors, 1);
@@ -266,7 +226,7 @@ test("IPC report failure is visible in the final result without retrying an unce
 
 test("task-local summary bounds details but keeps cumulative outcomes exact", async () => {
   const f = fixture({ steps: 20 });
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.food.attempts, 20);
   assert.equal(result.food.observedChange, 20);
   assert.equal(result.food.resumed, 20);
@@ -283,8 +243,9 @@ test("task-local summary bounds details but keeps cumulative outcomes exact", as
 test("a health event starts auto-eating while build progress is independently awaiting IPC", async () => {
   const f = fixture({ steps: 1 });
   f.bot.food = 20; // No initial meal or explicit loop check can start it.
-  const upsert = f.inbox.upsert;
-  f.inbox.upsert = async (...args) => {
+  const post = f.reporter.post;
+  f.reporter.post = async (...args) => {
+    if (!args[1]?.key) return post(...args);
     f.bot.food = 10;
     f.bot.emit("health");
     // The main build loop is still awaiting this call. Health-triggered work
@@ -292,9 +253,9 @@ test("a health event starts auto-eating while build progress is independently aw
     for (let i = 0; i < 30 && !f.trace.includes("report"); i++)
       await Promise.resolve();
     assert.ok(f.trace.includes("report"));
-    return upsert(...args);
+    return post(...args);
   };
-  const result = await buildWithAutoeat(f.bot, f.inbox, f.plan, f.options);
+  const result = await buildWithAutoeat(f.bot, f.reporter, f.plan, f.options);
   assert.equal(result.food.attempts, 1);
   assert.equal(result.food.observedChange, 1);
   assert.equal(result.food.resumed, 0);

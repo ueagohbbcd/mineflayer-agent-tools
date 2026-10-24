@@ -3,47 +3,38 @@
  * characters' Mineflayer processes, so that it keeps working when a
  * character's process is blocked or restarting.
  *
- * - the report queue (inbox) that programs post to with InboxClient;
+ * - the log (log/), that programs and modules write to with LogClient and
+ *   that `mf log` reads straight from its files;
  * - one bot host (host/cli.mjs, the real Mineflayer bot) per character,
  *   restarted when it exits;
  * - programs, run as tasks with log files (host/run.mjs inside bash);
- * - the default read-only scripts (observer, chat, trend watchdog);
+ * - the default read-only modules (chat by default; danger, radar, explore
+ *   and watchdog on request, see MF_DEFAULT_SCRIPTS);
  * - the idle behaviour between the model's programs;
  * - a control socket that bin/mf.mjs talks to.
  *
  * `run` starts a program, streams its output and waits until it ends, is
- * interrupted, or an urgent report arrives (then it returns early and the
- * program goes on). `inbox` returns the reports queued since the last read,
- * up to a size budget. See runtime/README.md.
+ * interrupted, or an urgent log entry arrives (then it returns early with
+ * the reason only, and the program goes on). See runtime/README.md.
  *
- * A stop is a report whose data carries `stop: "reason"`. The supervisor
- * posts them itself for death, a new dimension, a session change, a
- * disconnect and a crashed or unresponsive process (from the character's
- * process over an internal channel, so they hold with every default script
- * turned off); a program or an adapter may post one too. While a stop is
- * unread, the character's controlling program is interrupted and no new one
- * starts; reading it with `mf inbox` is the confirmation. Stops are never
- * dropped for room or age and every inbox result carries all of them.
+ * A stop is a log entry whose data carries `stop: "reason"`. The supervisor
+ * writes them itself (source `runtime`) for death, a new dimension, a
+ * session change, a disconnect and a crashed or unresponsive process (from
+ * the character's process over an internal channel, so they hold with every
+ * module turned off); a program may write one too. A stop interrupts the
+ * character's controlling program; the next `mf run` on that character
+ * starts by printing the stops it has not shown yet.
  *
  * Each character has its own controlling program, idle behaviour and
  * takeover lock.
- *
- * Delivery is a two-step exchange: the result is written, and its reports
- * and stops count as given only after the caller confirms it read the
- * result. A caller that disconnects first leaves them queued for the next
- * result: they may repeat, but are not lost.
- *
- * Every result whose reports count as given is also appended to
- * `inbox.jsonl` in the state directory, one JSON line each, so what the
- * agent was told can be read after the game (the file moves to
- * `inbox.1.jsonl` past MF_INBOX_LOG_BYTES, 20 MB).
  */
-import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Inbox, createInboxServer } from "./inbox/index.mjs";
+import { LogStore, createLogServer } from "./log/index.mjs";
+import { readCursor } from "./log/view.mjs";
 import { TaskManager } from "./tasks/index.mjs";
 import { startBotHosts } from "./host/launcher.mjs";
 import { StringDecoder } from "node:string_decoder";
@@ -55,20 +46,21 @@ const runScript = here("./host/run.mjs");
 const builtinIdle = here("./default-scripts/idle.mjs");
 const snapshotScript = here("./default-scripts/snapshot.mjs");
 const defaultScriptFiles = {
-  observer: here("./default-scripts/observer.mjs"),
   chat: here("./default-scripts/chat.mjs"),
+  danger: here("./default-scripts/danger.mjs"),
+  radar: here("./default-scripts/radar.mjs"),
+  explore: here("./default-scripts/explore.mjs"),
   watchdog: here("./default-scripts/watchdog.mjs"),
 };
 // Programs import the toolkit from here: `${process.env.MF_TOOLKIT_ROOT}/runtime/...`.
 const toolkitRoot = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 /**
- * The stop a report carries: `stop: "reason"` in its data. Such a report
- * makes the model's plan stale: the character's program is stopped and the
- * next one waits until the caller has read it.
+ * The stop a log entry carries: `stop: "reason"` in its data. Such an entry
+ * makes the model's plan stale: the character's program is stopped.
  */
-export function stopReason(message) {
-  const stop = message?.data?.stop;
+export function stopReason(entry) {
+  const stop = entry?.data?.stop;
   return typeof stop === "string" && stop ? stop.slice(0, 120) : null;
 }
 
@@ -122,7 +114,7 @@ export async function startSupervisor({
   env = process.env,
   stateDir = env.MF_STATE_DIR || join(cwd, ".mf"),
   names,
-  defaultScripts = (env.MF_DEFAULT_SCRIPTS ?? "observer,chat,watchdog")
+  defaultScripts = (env.MF_DEFAULT_SCRIPTS ?? "chat")
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean),
@@ -130,12 +122,11 @@ export async function startSupervisor({
   // Longer than run.mjs's grace for a stuck module (it then stops the host),
   // so a replaced program has really let go of the bot before the next starts.
   killGraceMs = 5000,
-  // How much report text one result carries (MF_REPORT_BYTES); the rest waits.
-  reportBytes = Number(env.MF_REPORT_BYTES ?? 16000),
   // A character's process that sends no heartbeat for this long is killed
   // and restarted (MF_HOST_UNRESPONSIVE_SECONDS; 0 turns it off).
   unresponsiveMs = Number(env.MF_HOST_UNRESPONSIVE_SECONDS ?? 20) * 1000,
-  inboxLogBytes = Number(env.MF_INBOX_LOG_BYTES ?? 20_000_000),
+  // A source's log file moves to <source>.1.jsonl past this size.
+  logFileBytes = Number(env.MF_LOG_FILE_BYTES ?? 20_000_000),
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
   for (const name of defaultScripts)
@@ -144,25 +135,36 @@ export async function startSupervisor({
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   const gitignore = join(stateDir, ".gitignore");
   if (!existsSync(gitignore)) await writeFile(gitignore, "*\n");
-  const sessionId = env.MC_INBOX_SESSION || `mf-${Date.now()}`;
-  const inboxSocket = socketPath(resolve(stateDir), "inbox.sock");
+  const sessionId = `mf-${Date.now()}`;
+  const logSocket = socketPath(resolve(stateDir), "log.sock");
   const controlSocket = socketPath(resolve(stateDir), "control.sock");
   await claimSocket(controlSocket);
-  await claimSocket(inboxSocket);
-  // Reports wait until the model receives them; only the size limit (or a
-  // ttlMs a program sets on its own message) drops them.
-  const inbox = new Inbox({
-    sessionId,
-    ttlMs: Infinity,
-    keep: (message) => Boolean(stopReason(message)),
+  await claimSocket(logSocket);
+  const logDir = join(stateDir, "log");
+  const store = new LogStore({
+    dir: logDir,
+    maxFileBytes: logFileBytes,
+    onError: (error) => log(`log: ${error.message}`),
   });
-  const inboxServer = await createInboxServer({
-    inbox,
-    socketPath: inboxSocket,
+  // Entries since this supervisor started, per source: seq and urgency, for
+  // the "unread" line under every result.
+  const recent = new Map();
+  store.on("entry", (entry) => {
+    if (!recent.has(entry.source)) recent.set(entry.source, []);
+    const list = recent.get(entry.source);
+    list.push({ seq: entry.seq, urgent: Boolean(entry.urgent) });
+    if (list.length > 10000) list.splice(0, list.length - 10000);
   });
-  const inboxEnv = {
-    MC_INBOX_SESSION: sessionId,
-    MC_INBOX_SOCKET: inboxSocket,
+  // Filled in below, once the tasks exist: who wrote an entry.
+  let describe = (entry) => entry;
+  const logServer = await createLogServer({
+    store,
+    socketPath: logSocket,
+    describe: (entry) => describe(entry),
+  });
+  const logEnv = {
+    MF_LOG_SOCKET: logSocket,
+    MF_LOG_DIR: resolve(logDir),
     MF_TOOLKIT_ROOT: toolkitRoot,
   };
 
@@ -174,7 +176,7 @@ export async function startSupervisor({
   let hosts;
   try {
     hosts = await startBotHosts({
-      env: { ...env, ...inboxEnv },
+      env: { ...env, ...logEnv },
       ...(names ? { names } : {}),
       runDir: join(stateDir, "bots"),
       log,
@@ -186,38 +188,67 @@ export async function startSupervisor({
         const expected =
           (signal === "SIGKILL" || code === 75) &&
           Date.now() < (cancelling.get(host.name) ?? 0);
-        inbox.post(
-          {
-            sessionId,
-            kind: "event",
-            priority: expected ? "normal" : "urgent",
-            data: {
-              type: expected ? "host.restarted" : "host.crashed",
-              bot: host.name,
-              exit: signal ?? code,
-              ...(expected ? {} : { stop: "host crashed" }),
-            },
+        store.append({
+          source: "runtime",
+          type: expected ? "host.restarted" : "host.crashed",
+          bot: host.name,
+          urgent: !expected,
+          data: {
+            exit: signal ?? code,
+            ...(expected ? {} : { stop: "host crashed" }),
           },
-          { source: "runtime" },
-        );
+        });
       },
     });
   } catch (error) {
-    await inboxServer.close();
+    await logServer.close();
     throw error;
   }
   const sockets = new Map(hosts.bots.map((bot) => [bot.name, bot.runSocket]));
   const mainBot = hosts.bots[0].name;
   const taskDir = join(stateDir, "tasks");
   const tasks = new TaskManager({
-    inbox,
+    onUnwatchedEnd: (task) => {
+      if (task.quiet) return;
+      const tail = (buffer) => {
+        const text = buffer.toString("utf8");
+        return text.length > 600 ? `…${text.slice(-600)}` : text;
+      };
+      const stopped = (task.exitCode === 130 || task.signal) && task.interruptReason;
+      store.append({
+        source: "tasks",
+        type: "ended",
+        bot: taskBots.get(task.id),
+        task: task.id,
+        label: task.label,
+        data: {
+          ...(stopped ? { interrupted: task.interruptReason } : {}),
+          ...(task.exitCode !== null ? { exitCode: task.exitCode } : {}),
+          ...(task.signal ? { signal: task.signal } : {}),
+          seconds: Math.round((task.completedAt - task.startedAt) / 100) / 10,
+          ...(task.stdout.length ? { stdout: tail(task.stdout) } : {}),
+          ...(task.stderr.length ? { stderr: tail(task.stderr) } : {}),
+          ...(task.logDir ? { logDir: task.logDir } : {}),
+        },
+      });
+    },
     cwd,
-    env: { ...inboxEnv, ...hosts.env, MF_TASK_DIR: taskDir },
+    env: { ...logEnv, ...hosts.env, MF_TASK_DIR: taskDir },
     logDir: taskDir,
     killGraceMs,
   });
   // The character each task runs on.
   const taskBots = new Map();
+  describe = ({ source, type, key, urgent, bot, task, data }) => ({
+    source: source ?? "program",
+    type,
+    key,
+    urgent,
+    bot: bot ?? taskBots.get(task),
+    task,
+    label: tasks.tasks.get(task)?.label,
+    data,
+  });
 
   // Per character: its controlling program and idle, and the lock that
   // orders takeovers.
@@ -234,6 +265,8 @@ export async function startSupervisor({
         idleTimer: undefined,
         idleCustomFailed: null,
         idleOff: !idleEnabled,
+        // Stops not yet shown at the start of a run or as its result.
+        pendingStops: [],
       },
     ]),
   );
@@ -269,9 +302,11 @@ export async function startSupervisor({
       quote(file),
       ...args.map(quote),
     ].join(" ");
-  function startTask(file, { bot, args, persistent, readOnly, ...options }) {
+  // quiet: a routine run (idle, snapshot) whose end is not logged.
+  function startTask(file, { bot, args, persistent, readOnly, quiet, ...options }) {
     const id = tasks.start(moduleCommand(file, { args, bot, persistent, readOnly }), options);
     taskBots.set(id, bot ?? mainBot);
+    if (quiet) tasks.tasks.get(id).quiet = true;
     return id;
   }
   const completion = (id) =>
@@ -298,25 +333,20 @@ export async function startSupervisor({
     }
   }
 
-  /** The characters a message is about; none known means all of them. */
-  const nameOf = (message) => message.data?.bot ?? message.bot ?? taskBots.get(message.taskId);
-  function charactersOf(message) {
-    const name = nameOf(message);
+  /** The characters an entry is about; none known means all of them. */
+  function charactersOf(entry) {
+    const name = entry.bot ?? taskBots.get(entry.task);
     return chars.has(name) ? [chars.get(name)] : [...chars.values()];
   }
-  /** Stops about c that the caller has not read yet. */
-  const unreadStops = (c) =>
-    inbox.items
-      .map((item) => item.message)
-      .filter((message) => stopReason(message) && charactersOf(message).includes(c))
-      .map(stopReason);
-  inbox.on("message", (message) => {
-    const reason = stopReason(message);
+  store.on("entry", (entry) => {
+    const reason = stopReason(entry);
     if (!reason) return;
-    for (const c of charactersOf(message)) {
+    for (const c of charactersOf(entry)) {
+      c.pendingStops.push(entry);
       const task = c.controller && tasks.tasks.get(c.controller);
       if (task?.status === "running" && !task.interruptReason) {
         task.interruptReason = reason;
+        task.interruptStop = entry;
         cancelTask(c.controller);
       }
     }
@@ -380,34 +410,30 @@ export async function startSupervisor({
         cwd,
         label: `${file === builtinIdle ? "idle (built-in)" : "idle (idle.mjs)"}${chars.size > 1 ? ` (${c.name})` : ""}`,
         background: true,
+        quiet: true,
       });
       const entry = { id, file, cancelled: false };
       c.idle = entry;
       const task = tasks.tasks.get(id);
       task.child.once("close", (code) => {
         if (c.idle === entry) c.idle = null;
-        // Idle ending is routine; only a failure (below) is worth a report.
-        if (task.eventId) inbox.remove(task.eventId);
+        // Idle ending is routine; only a failure (below) is worth an entry.
         task.delivered = true;
         forget(id);
         if (entry.cancelled || closed) return;
         if (code === 75) return scheduleIdle(c, 1000); // Host restarting.
         const stderr = task.stderr.toString("utf8").slice(-600);
-        inbox.post(
-          {
-            sessionId,
-            kind: "event",
-            data: {
-              type: "idle.failed",
-              bot: c.name,
-              file,
-              exitCode: code,
-              stderr,
-              ...(file === builtinIdle ? {} : { fallback: "built-in idle" }),
-            },
+        store.append({
+          source: "runtime",
+          type: "idle.failed",
+          bot: c.name,
+          data: {
+            file,
+            exitCode: code,
+            stderr,
+            ...(file === builtinIdle ? {} : { fallback: "built-in idle" }),
           },
-          { source: "runtime" },
-        );
+        });
         if (file !== builtinIdle) {
           c.idleCustomFailed = statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? null;
           scheduleIdle(c, 0);
@@ -417,130 +443,57 @@ export async function startSupervisor({
     if (retry) scheduleIdle(c, retry);
   }
 
-  const inboxLog = join(stateDir, "inbox.jsonl");
-  /** Append what was given to inbox.jsonl; a failed write is logged, not fatal. */
-  function journal(response) {
-    try {
-      if (existsSync(inboxLog) && statSync(inboxLog).size > inboxLogBytes)
-        renameSync(inboxLog, join(stateDir, "inbox.1.jsonl"));
-      const { status, reports, moreReports, droppedReports } = response;
-      appendFileSync(
-        inboxLog,
-        `${JSON.stringify({ at: new Date().toISOString(), status, reports, moreReports, droppedReports })}\n`,
-      );
-    } catch (error) {
-      log(`inbox log: ${error.message}`);
-    }
-  }
-
-  /**
-   * The result plus what it can carry: every unread stop and as many
-   * reports as fit in the budget. `commit` marks exactly those reports as
-   * given. Only `mf inbox` delivers: `mf run` may end in a background job's
-   * output that the model reads later or never, so it carries only its own
-   * result.
-   */
-  let lastBatch = null;
-  function deliver(result) {
-    const batch = inbox.select({ maxBytes: reportBytes });
-    const generationOf = (bot) => chars.get(bot)?.host.generation;
-    const response = {
-      ...result,
-      reports: batch.messages.map(
-        ({ id, sessionId: _, expiresAt, eligibleAt, generation, ...message }) => {
-          const label = message.taskId && tasks.tasks.get(message.taskId)?.label;
-          // A program that ended unwatched says why it was stopped.
-          const stopped =
-            message.data?.type === "task.completed" &&
-            (message.data.exitCode === 130 || message.data.signal) &&
-            tasks.tasks.get(message.data.taskId)?.interruptReason;
-          // An unwatched program's end carries only the end of its output.
-          if (message.data?.type === "task.completed")
-            for (const channel of ["stdout", "stderr"])
-              if (typeof message.data[channel] === "string" && message.data[channel].length > 2000)
-                message.data = { ...message.data, [channel]: `…${message.data[channel].slice(-2000)}` };
-          return {
-            ...message,
-            ...(label ? { from: label } : {}),
-            // Seen by a process of the character that has since restarted.
-            ...(generation && message.bot && generation !== generationOf(message.bot)
-              ? { earlierProcess: true }
-              : {}),
-            ...(stopped ? { data: { ...message.data, interrupted: stopped } } : {}),
-          };
-        },
-      ),
-      ...(batch.remaining ? { moreReports: batch.remaining } : {}),
-      ...(batch.accumulating.length ? { accumulating: batch.accumulating } : {}),
-      ...(batch.dropped.overflow || batch.dropped.expired
-        ? { droppedReports: batch.dropped }
-        : {}),
-    };
-    const commit = () => {
-      inbox.commit(batch);
-      if (response.reports.length) journal(response);
-      // Kept for `mf inbox --again`, for output the caller lost.
-      if (response.reports.length) lastBatch = { status: "inbox", reports: response.reports };
-    };
-    return { response, commit };
-  }
-
-  /** What is waiting in the inbox, for the line under every other result. */
+  /** Entries not read with `mf log` yet, for the line under every result. */
   function unread() {
-    const now = Date.now();
-    const eligible = inbox.items.filter((item) => (item.eligibleAt ?? 0) <= now);
-    const stops = [...new Set(eligible.map((item) => stopReason(item.message)).filter(Boolean))];
-    return {
-      reports: eligible.length,
-      urgent: eligible.filter((item) => item.message.priority === "urgent").length,
-      ...(stops.length ? { stops } : {}),
-    };
-  }
-
-  /** Ask the producers for their whole state, and give them a moment to send it. */
-  async function full() {
-    inbox.signal("full");
-    const deadline = Date.now() + 2000;
-    let last = Date.now();
-    const seen = () => (last = Date.now());
-    inbox.on("message", seen);
-    // Done once nothing new has come for 300 ms (at least 300 ms, at most 2 s).
-    while (Date.now() < deadline && Date.now() - last < 300)
-      await new Promise((done) => setTimeout(done, 50));
-    inbox.off("message", seen);
+    const cursor = readCursor(logDir);
+    let entries = 0;
+    let urgent = 0;
+    for (const [source, list] of recent) {
+      const after = cursor[source] ?? 0;
+      for (let i = list.length - 1; i >= 0 && list[i].seq > after; i--) {
+        entries++;
+        if (list[i].urgent) urgent++;
+      }
+    }
+    return { entries, urgent };
   }
 
   /**
-   * Wait until the program ends, or the caller goes away, or an urgent report
-   * is unread (then the result says so and the program keeps running; its end
-   * is reported in the inbox). Its output went to the caller as it was
-   * printed, so the result leaves it out.
+   * Wait until the program ends, or the caller goes away, or an urgent log
+   * entry arrives (then the result gives its reason and the program keeps
+   * running; its end goes to the log). Its output went to the caller as it
+   * was printed, so the result leaves it out.
    */
   async function waitTask(id, { signal }) {
     const early = new AbortController();
-    const urgent = (message) => {
+    let why;
+    const urgent = (entry) => {
       // A stop ends the program itself: its result says so.
-      if (!stopReason(message)) early.abort();
+      if (stopReason(entry) || early.signal.aborted) return;
+      why = `${entry.type ?? "urgent entry"} in ${entry.source}${entry.bot ? ` (${entry.bot})` : ""}`;
+      early.abort();
     };
-    const hasUrgent = () =>
-      inbox.items.some((item) => item.message.priority === "urgent" && !stopReason(item.message));
-    inbox.on("urgent", urgent);
-    if (hasUrgent()) early.abort();
+    store.on("urgent", urgent);
     let result;
     try {
       result = await tasks.wait(id, { signal: AbortSignal.any([signal, early.signal].filter(Boolean)) });
     } finally {
-      inbox.off("urgent", urgent);
+      store.off("urgent", urgent);
     }
     const { stdout: _, stderr: __, ...rest } = result;
     const task = tasks.tasks.get(id);
     if (result.status === "running" && early.signal.aborted && !signal?.aborted)
-      return { ...rest, character: taskBots.get(id), reason: "returned early: an urgent report is unread" };
+      return { ...rest, character: taskBots.get(id), reason: `returned early: ${why}; see \`mf log\`` };
     // Interrupted only if it ended because it was stopped, not on its own.
     const stopped = result.exitCode === 130 || result.signal;
-    return task?.interruptReason && result.status === "completed" && stopped
-      ? { ...rest, status: "interrupted", reason: task.interruptReason }
-      : rest;
+    if (task?.interruptReason && result.status === "completed" && stopped) {
+      // The result says it, so the next run need not say it again.
+      const c = chars.get(taskBots.get(id));
+      if (c && task.interruptStop && !signal?.aborted)
+        c.pendingStops = c.pendingStops.filter((entry) => entry !== task.interruptStop);
+      return { ...rest, status: "interrupted", reason: task.interruptReason };
+    }
+    return rest;
   }
 
   /** Send the task's output to the caller as it is printed. */
@@ -557,14 +510,15 @@ export async function startSupervisor({
     }
   }
 
-  // A refused start says why; the details, and clearing the refusal, are
-  // `mf inbox`'s.
-  const refusing = (c) => unreadStops(c).length > 0;
-  const notStarted = (c) => ({
-    status: "not_started",
-    character: c.name,
-    reason: `${c.name}: ${[...new Set(unreadStops(c))].join(", ")} since you last read the inbox; the program was not started. Read \`mf inbox\`, then decide again`,
-  });
+  /** The stops not shown yet, as lines for the start of the next run. */
+  function takeStops(c) {
+    const lines = c.pendingStops.map(
+      (entry) =>
+        `[since your last run] stop: ${stopReason(entry)} (${entry.bot ?? c.name}, ${new Date(entry.at).toISOString().slice(11, 19)})${entry.data?.position ? ` at ${JSON.stringify(entry.data.position)}` : ""}`,
+    );
+    c.pendingStops = [];
+    return lines;
+  }
 
   /**
    * Whether a module controls the character: false when it exports
@@ -612,7 +566,6 @@ export async function startSupervisor({
       streamTask(id, stream);
       return waitTask(id, { signal });
     }
-    if (refusing(c)) return notStarted(c);
     c.starting++;
     let id;
     let refused;
@@ -622,8 +575,6 @@ export async function startSupervisor({
       id = await withLock(c, async () => {
         await takeOver(c);
         await hostReady(request.bot);
-        // A stop while the old program ended or the host restarted.
-        if (refusing(c)) return void (refused = notStarted(c));
         if (signal?.aborted)
           return void (refused = { status: "not_started", reason: "the caller disconnected" });
         const started = start();
@@ -641,6 +592,9 @@ export async function startSupervisor({
         scheduleIdle(c, 0);
       }
     });
+    // Stops up to now (including one while the old program ended or the
+    // host restarted) come first, then the program's output.
+    for (const text of takeStops(c)) stream?.({ stream: "note", text });
     streamTask(id, stream);
     return waitTask(id, { signal });
   }
@@ -653,12 +607,12 @@ export async function startSupervisor({
       cwd: request.cwd || cwd,
       label: "snapshot",
       background: true,
+      quiet: true,
     });
     const result = await tasks.wait(id, { timeoutMs: 15000 });
     if (result.status !== "completed") cancelTask(id);
     await completion(id);
     const task = tasks.tasks.get(id);
-    if (task?.eventId) inbox.remove(task.eventId);
     if (task) task.delivered = true;
     // A cut snapshot keeps its log directory, where the whole output is.
     if (!result.outputDroppedBytes) forget(id);
@@ -689,13 +643,9 @@ export async function startSupervisor({
         name,
         running: Boolean(pid),
         idle: !chars.get(name).idleOff,
-        ...(unreadStops(chars.get(name)).length
-          ? { unreadStops: unreadStops(chars.get(name)) }
-          : {}),
       })),
       tasks: running,
-      // What programs set with InboxClient.setStatus.
-      programStatus: inbox.currentSnapshot(),
+      log: logDir,
     };
   }
 
@@ -738,15 +688,14 @@ export async function startSupervisor({
         if (message.type !== "lifecycle" || !LIFECYCLE[message.event]) continue;
         const { type: _, event, at: __, ...detail } = message;
         try {
-          inbox.post(
-            {
-              sessionId,
-              kind: "event",
-              priority: "urgent",
-              data: { ...LIFECYCLE[event], bot: c.name, ...detail },
-            },
-            { source: "runtime" },
-          );
+          const { type, stop } = LIFECYCLE[event];
+          store.append({
+            source: "runtime",
+            type,
+            bot: c.name,
+            urgent: true,
+            data: { stop, ...detail },
+          });
         } catch (error) {
           log(`lifecycle report failed: ${error.message}`);
         }
@@ -770,21 +719,17 @@ export async function startSupervisor({
         killedUnresponsive.add(c.name);
         watch.socket.destroy();
         watches.delete(c.name);
-        inbox.post(
-          {
-            sessionId,
-            kind: "event",
-            priority: "urgent",
-            data: {
-              type: "host.unresponsive",
-              bot: c.name,
-              seconds: Math.round((Date.now() - watch.lastBeat) / 1000),
-              action: "restarting the character's process",
-              stop: "character process unresponsive",
-            },
+        store.append({
+          source: "runtime",
+          type: "host.unresponsive",
+          bot: c.name,
+          urgent: true,
+          data: {
+            seconds: Math.round((Date.now() - watch.lastBeat) / 1000),
+            action: "restarting the character's process",
+            stop: "character process unresponsive",
           },
-          { source: "runtime" },
-        );
+        });
         try {
           process.kill(pid, "SIGKILL");
         } catch {}
@@ -793,14 +738,11 @@ export async function startSupervisor({
   }, 1000);
   liveness.unref?.();
 
-  /**
-   * Answer one request: { response, commit? }. commit, when present, is
-   * called only after the caller confirmed it read the response.
-   */
+  /** Answer one request: { response }. */
   async function handle(request, signal, stream) {
     const answer = await answerRequest(request, signal, stream);
-    // Every result but the inbox's says what is waiting there.
-    if (request.type !== "inbox" && request.type !== "shutdown" && answer.response?.status !== "error")
+    // Every result says how much of the log is unread.
+    if (request.type !== "shutdown" && answer.response?.status !== "error")
       answer.response = { ...answer.response, unread: unread() };
     return answer;
   }
@@ -853,11 +795,6 @@ export async function startSupervisor({
           },
         };
       }
-      case "inbox":
-        if (request.again)
-          return { response: lastBatch ? { ...lastBatch, again: true } : { status: "inbox", reports: [] } };
-        if (request.full) await full();
-        return deliver({ status: "inbox", ...(request.full ? { full: true } : {}) });
       case "status":
         return { response: status() };
       case "snapshot":
@@ -898,22 +835,10 @@ export async function startSupervisor({
         if (!client.destroyed) client.write(`${JSON.stringify(message)}\n`);
       };
       handle(request, detached.signal, stream).then(
-        ({ response, commit }) => {
-          // A caller that has gone gets nothing, and nothing counts as given.
+        ({ response }) => {
+          // A caller that has gone gets nothing.
           if (client.destroyed || detached.signal.aborted) return;
-          if (!commit) return client.end(`${JSON.stringify(response)}\n`);
-          client.write(`${JSON.stringify(response)}\n`);
-          // The caller answers "ack" once it has read the result.
-          let acked = "";
-          const timer = setTimeout(() => client.destroy(), 10000);
-          client.on("data", (more) => {
-            acked += more;
-            if (!acked.includes("\n")) return;
-            clearTimeout(timer);
-            if (acked.trim() === "ack") commit();
-            client.end();
-          });
-          client.once("close", () => clearTimeout(timer));
+          client.end(`${JSON.stringify(response)}\n`);
         },
         (error) => {
           if (!client.destroyed)
@@ -939,7 +864,7 @@ export async function startSupervisor({
     // them then end on their own.
     hosts.close();
     await tasks.close();
-    await inboxServer.close();
+    await logServer.close();
     markClosed();
   }
 
@@ -973,7 +898,7 @@ export async function startSupervisor({
   for (const c of chars.values()) scheduleIdle(c, 0);
 
   // Resolves once the supervisor has shut down (after close() or `mf stop`).
-  return { controlSocket, inbox, tasks, defaults, hosts, chars, close, closed: whenClosed, handle };
+  return { controlSocket, store, logDir, tasks, defaults, hosts, chars, close, closed: whenClosed, handle };
 }
 
 if (

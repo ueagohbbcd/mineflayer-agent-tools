@@ -4,19 +4,10 @@ import { registerHooks } from "node:module";
 import { EventEmitter } from "node:events";
 import { Vec3 } from "vec3";
 
-const messages = [];
 let attackStarted;
 const attackReady = new Promise((resolve) => {
   attackStarted = resolve;
 });
-globalThis.fightTargetInbox = class {
-  async post(data) {
-    messages.push({ kind: "post", data });
-  }
-  async upsert(key, data) {
-    messages.push({ kind: "upsert", key, data });
-  }
-};
 globalThis.fightTargetNative = {
   loadPvp: (bot) => bot.pvp,
   stopBot(bot) {
@@ -26,11 +17,6 @@ globalThis.fightTargetNative = {
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier === "../runtime/inbox/index.mjs")
-      return {
-        url: `data:text/javascript,${encodeURIComponent("export const InboxClient = globalThis.fightTargetInbox;")}`,
-        shortCircuit: true,
-      };
     if (specifier === "./native.mjs")
       return {
         url: `data:text/javascript,${encodeURIComponent("export const loadPvp = (...args) => globalThis.fightTargetNative.loadPvp(...args); export const stopBot = (...args) => globalThis.fightTargetNative.stopBot(...args);")}`,
@@ -41,8 +27,7 @@ registerHooks({
 });
 const { default: fightTarget } = await import("../../examples/fight-target.mjs");
 
-test("native fight task reports its selected target and cancellation summary", async () => {
-  messages.length = 0;
+test("native fight task prints its selected target and cancellation summary", async () => {
   const bot = Object.assign(new EventEmitter(), {
     health: 17,
     entity: { position: new Vec3(0, 64, 0) },
@@ -88,6 +73,10 @@ test("native fight task reports its selected target and cancellation summary", a
   controller.abort(new Error("task cancelled"));
   await assert.rejects(running, /abort/i);
 
+  const messages = logs
+    .filter((line) => line.startsWith("{"))
+    .map((line) => ({ data: JSON.parse(line) }))
+    .filter((m) => m.data.type);
   const decision = messages.find((m) => m.data.type === "combat.decision");
   assert.deepEqual(
     decision.data.candidates.map((e) => e.id),

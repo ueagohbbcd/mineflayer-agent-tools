@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Inbox } from "../../runtime/inbox/index.mjs";
 import { TaskManager } from "../../runtime/tasks/index.mjs";
 
 const fixture = fileURLToPath(
@@ -20,7 +19,7 @@ const events = (output) =>
     .map((line) => JSON.parse(line));
 
 async function cancelExample(t, name, args, env = {}) {
-  const tasks = new TaskManager({ inbox: new Inbox() });
+  const tasks = new TaskManager();
   t.after(() => tasks.close());
   const filename = fileURLToPath(
     new URL(`../../examples/${name}`, import.meta.url),
@@ -77,7 +76,7 @@ test("managed SIGTERM cancels the native navigation module and clears controls b
   assert.ok(trace.some((event) => event.type === "goal.cleared"));
   assert.ok(trace.some((event) => event.type === "controls.released"));
   assert.ok(!trace.some((event) => event.type === "deferred.stop"));
-  assert.ok(!trace.some((event) => event.type === "inbox.post"));
+  assert.ok(!trace.some((event) => event.type === "log.post"));
 });
 
 for (const slowEquip of [false, true]) {

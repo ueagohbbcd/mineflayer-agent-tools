@@ -1,5 +1,5 @@
 // Run an exported participant module through the native bot-host runner. The
-// Mineflayer bot and runner are real; only the game connection and inbox socket
+// Mineflayer bot and runner are real; only the game connection and log socket
 // are local fixtures so cancellation can be exercised without a server.
 import { EventEmitter } from "node:events";
 import { createRequire, registerHooks } from "node:module";
@@ -115,24 +115,22 @@ bot.deactivateItem = () => {
   void action("item.released", () => (usingItem = false));
 };
 
-// The native module communicates through InboxClient. This local fixture keeps
+// Some modules write to the log through LogClient. This local fixture keeps
 // the test focused on module cancellation and bot cleanup, without substituting
 // the participant module or host APIs.
-globalThis.fixtureInbox = class {
-  async upsert() {
-    if (radar) log("ready");
+globalThis.fixtureLog = class {
+  async post(data, { key } = {}) {
+    if (radar && key) log("ready");
+    else log("log.post", { data });
   }
-  async post(data) {
-    log("inbox.post", { data });
-  }
-  async requestJudgment() {}
+  summary() {}
 };
-const inboxStub = `export const InboxClient = globalThis.fixtureInbox;`;
-const inboxUrl = `data:text/javascript,${encodeURIComponent(inboxStub)}`;
+const logStub = `export const LogClient = globalThis.fixtureLog;`;
+const logUrl = `data:text/javascript,${encodeURIComponent(logStub)}`;
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier === "../runtime/inbox/index.mjs")
-      return { url: inboxUrl, shortCircuit: true };
+    if (specifier === "../runtime/log/index.mjs")
+      return { url: logUrl, shortCircuit: true };
     return nextResolve(specifier, context);
   },
 });

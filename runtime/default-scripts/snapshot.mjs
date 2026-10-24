@@ -3,12 +3,11 @@
  *
  *   mf snapshot [--full-entities] [--full-local] [--full-items]
  *
- * Uses the same public session facts (teams, goal items) and observer
- * configuration as the default observer. Programs can import `observe`.
+ * Uses the public session facts (teams, goal items) when there is a session.
+ * Programs can import `observe`.
  */
 import { observe } from "../observation/observe.mjs";
 import { observationOptionsFromSession } from "../observation/session-options.mjs";
-import { readObserverOptions } from "../observation/observer-config.mjs";
 export { observe };
 
 const flags = {
@@ -37,7 +36,6 @@ export default async function observeProgram(bot, { args = [] }) {
   const session = await bot.getSessionState?.().catch(() => undefined);
   const result = await observe(bot, {
     ...observationOptionsFromSession(session),
-    ...(await readObserverOptions(process.cwd())),
     ...options,
   });
   return result;
