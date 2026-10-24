@@ -23,7 +23,7 @@ export function hostEnv(env, { name, runSocket, index, runDir }) {
   return {
     ...env,
     MF_USERNAME: name,
-    // Set only inside the character's own process (InboxClient reads it).
+    // Set only inside the character's own process (LogClient reads it).
     MF_CHARACTER: name,
     MF_RUN_SOCKET: runSocket,
     MF_BOT_INDEX: String(index),

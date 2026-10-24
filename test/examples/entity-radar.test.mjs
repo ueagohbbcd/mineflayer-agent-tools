@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sampleEntities, watchEntities } from "../../examples/entity-radar.mjs";
-import { Inbox } from "../../runtime/inbox/index.mjs";
 const entity = (id, x) => ({
   id,
   type: "player",
@@ -31,42 +30,33 @@ test("radar excludes self, bounds and sorts observed entities without inventing 
   bot.entities[3].position.x = 9;
   assert.equal(sample.entities[0].position.x, 2);
 });
-test("radar replaces pending samples, publishes empty state and respects TTL", async () => {
+test("radar logs a sample only when it changed, under one key", async () => {
   const bot = fixture(),
     controller = new AbortController();
-  let now = 0,
-    count = 0;
-  const queue = new Inbox({ sessionId: "radar", now: () => now });
+  let rounds = 0;
+  const posted = [];
   await watchEntities(
     bot,
     {
-      async upsert(key, data, options) {
-        queue.post({
-          sessionId: "radar",
-          kind: "state",
-          key,
-          data,
-          ...options,
-        });
-        if (++count === 1) bot.entities = {};
-        else controller.abort();
+      async post(data, options) {
+        posted.push({ data, options });
       },
     },
-    { intervalMs: 1, ttlMs: 10, signal: controller.signal },
+    {
+      intervalMs: 1,
+      signal: controller.signal,
+      judge: () => {
+        if (++rounds === 2) bot.entities = {};
+        if (rounds === 4) controller.abort();
+        return null;
+      },
+    },
   );
-  const batch = queue.drain();
-  assert.equal(batch.messages.length, 1);
-  assert.equal(batch.messages[0].key, "nearby.entities");
-  assert.deepEqual(batch.messages[0].data.entities, []);
-  queue.post({
-    sessionId: "radar",
-    kind: "state",
-    key: "nearby.entities",
-    data: {},
-    ttlMs: 10,
-  });
-  now = 11;
-  assert.equal(queue.drain().messages.length, 0);
+  // Rounds 1 and 2 saw the same entities; rounds 3 and 4 saw none.
+  assert.equal(posted.length, 2);
+  assert.deepEqual(posted.map((p) => p.options.key), ["nearby.entities", "nearby.entities"]);
+  assert.equal(posted[0].data.total, 2);
+  assert.deepEqual(posted[1].data.entities, []);
 });
 test("a continuing threat is deduplicated even after its cooldown", async () => {
   const controller = new AbortController();
@@ -75,10 +65,8 @@ test("a continuing threat is deduplicated even after its cooldown", async () => 
   await watchEntities(
     fixture(),
     {
-      async upsert() {
-        if (++samples === 3) controller.abort();
-      },
-      async requestJudgment(data) {
+      async post(data, options) {
+        if (!options?.urgent) return;
         judgments++;
         assert.equal(data.question, "Reassess?");
       },
@@ -87,7 +75,10 @@ test("a continuing threat is deduplicated even after its cooldown", async () => 
       intervalMs: 5,
       cooldownMs: 1,
       signal: controller.signal,
-      judge: () => ({ question: "Reassess?" }),
+      judge: () => {
+        if (++samples === 3) controller.abort();
+        return { question: "Reassess?" };
+      },
     },
   );
   assert.equal(samples, 3);

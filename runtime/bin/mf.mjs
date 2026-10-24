@@ -6,12 +6,10 @@
  *   mf stop                      stop them
  *   mf run [options] FILE [ARGS] run a module until it ends: its output
  *                                appears as it is printed, then how it ended.
- *                                It returns early while an urgent report is
- *                                unread; the program keeps running.
- *   mf inbox [--again] [--full]  the reports and stops since you last read
- *                                it (--again: show that last batch again;
- *                                --full: the observer sends its whole state
- *                                again instead of what changed)
+ *                                An urgent log entry makes it return early,
+ *                                with the reason; the program keeps running.
+ *   mf log [options]             what the log got since you last read it,
+ *                                source by source, summarized
  *   mf status                    characters, programs, idle
  *   mf cancel TASK_ID            stop a program (ending `mf run` does not)
  *   mf idle on|off [--bot NAME]  turn the behaviour between programs on or off
@@ -19,23 +17,25 @@
  *
  * Options for run:
  *   --bot NAME      which character (default: the first)
- *   --inbox S       if the program ends within S seconds, read `mf inbox`
- *                   right after it, in the same output. Set S no longer
- *                   than your tool waits for a command in the foreground:
- *                   a later end may sit in a background job's output, so
- *                   the inbox is left for you to read then.
  *   --read-only     a helper that does not replace the controlling program
  *                   (same as `export const control = false` in the module)
  *   --keep          a read-only helper that keeps running and restarts with
  *                   its character; mf returns once it has started
  *
+ * Options for log:
+ *   --source A,B    only these sources (runtime, tasks, chat, program, ...)
+ *   --bot NAME      only this character (leaves the rest unread)
+ *   --since 10m     everything from 10 minutes (or 90s, 1h) ago, read or not
+ *   --all           everything kept, read or not
+ *   --raw           entries as they are, without a source's summary
+ *   --peek          show what is new without marking it read
+ *
  * `mf run` waits until the program ends. To do other things meanwhile, run it
- * in your tool's background shell and read `mf inbox` in the foreground. For a
- * short program and the latest reports in one call: `mf run x.mjs; mf inbox`.
+ * in your tool's background shell and read `mf log` in the foreground.
  *
  * State lives in MF_STATE_DIR (default ./.mf, so run mf from the directory
- * where you started it). `mf start` needs MF_USERNAME (or MF_USERNAMES) and
- * MF_HOST.
+ * where you started it); the log is its log/ directory, one JSONL file per
+ * source. `mf start` needs MF_USERNAME (or MF_USERNAMES) and MF_HOST.
  */
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
@@ -44,17 +44,13 @@ import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { socketPath } from "../socket-path.mjs";
+import { readLog } from "../log/view.mjs";
 
 const stateDir = resolve(process.env.MF_STATE_DIR || join(process.cwd(), ".mf"));
 const controlSocket = socketPath(stateDir, "control.sock");
 const supervisorScript = fileURLToPath(new URL("../supervisor.mjs", import.meta.url));
 
-/**
- * Send one request and resolve with its result. Results that carry reports
- * wait for `ack()`: call it once the result is printed, and only then do the
- * reports count as given (without it they come again next time).
- */
-let pendingAck = () => {};
+/** Send one request and resolve with its result. */
 function request(message, onStream = () => {}) {
   return new Promise((done, fail) => {
     const socket = net.connect(controlSocket);
@@ -83,9 +79,7 @@ function request(message, onStream = () => {}) {
           continue;
         }
         settled = true;
-        pendingAck = () => {
-          if (!socket.destroyed) socket.end("ack\n");
-        };
+        socket.end();
         done(message);
       }
     });
@@ -112,18 +106,22 @@ function parse(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (rest.length) rest.push(arg);
-    else if (arg === "--inbox") {
-      const value = Number(argv[++i]);
-      if (!Number.isFinite(value) || value < 0) throw new Error("--inbox needs seconds");
-      options.inboxWithin = value;
-    } else if (arg === "--bot") {
+    else if (arg === "--bot") {
       options.bot = argv[++i];
       if (!options.bot) throw new Error("--bot needs a character name");
     }
     else if (arg === "--read-only") options.readOnly = true;
     else if (arg === "--keep") options.keep = true;
-    else if (arg === "--again") options.again = true;
-    else if (arg === "--full") options.full = true;
+    else if (arg === "--source") {
+      options.sources = (argv[++i] ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+      if (!options.sources.length) throw new Error("--source needs a source name");
+    } else if (arg === "--since") {
+      const match = /^(\d+(?:\.\d+)?)(s|m|h)$/.exec(argv[++i] ?? "");
+      if (!match) throw new Error("--since needs a duration such as 90s, 10m or 1h");
+      options.since = Date.now() - Number(match[1]) * { s: 1000, m: 60000, h: 3600000 }[match[2]];
+    } else if (arg === "--all") options.all = true;
+    else if (arg === "--raw") options.raw = true;
+    else if (arg === "--peek") options.peek = true;
     else rest.push(arg);
   }
   return { options, rest };
@@ -148,27 +146,6 @@ function header(result) {
   return `[${parts.join(", ")}]${ids.length ? ` ${ids.join(" ")}` : ""}`;
 }
 
-function report(message) {
-  const { priority, kind, key, taskId, source, createdAt, data, from: origin, bot, earlierProcess } = message;
-  const { type, stop, ...rest } = data && typeof data === "object" ? data : { value: data };
-  const mark = priority === "urgent" || stop ? "!" : "-";
-  const label = `${stop ? `stop: ${stop}, ` : ""}${type ?? key ?? kind}`;
-  const from = source === "runtime" ? "runtime" : (origin ?? taskId ?? source);
-  const about = [from, bot && !origin?.includes(bot) ? bot : null, new Date(createdAt).toISOString().slice(11, 19)]
-    .filter(Boolean)
-    .join(", ");
-  return `${mark} ${label} (${about}${earlierProcess ? ", before a restart" : ""}) ${JSON.stringify(rest)}`;
-}
-
-/** The end of `text`, at most `limit` bytes, and how many bytes were left out. */
-function tail(text, limit) {
-  const bytes = Buffer.from(text ?? "", "utf8");
-  if (bytes.length <= limit) return { text: text ?? "", omitted: 0 };
-  let start = bytes.length - limit;
-  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
-  return { text: bytes.subarray(start).toString("utf8"), omitted: start };
-}
-
 function print(result) {
   if (result.status === "error") {
     process.stderr.write(`mf: ${result.error}\n`);
@@ -179,23 +156,9 @@ function print(result) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  const out = [];
-  if (result.status !== "inbox") out.push(header(result));
-  if (result.again) out.push("(shown before; repeated with --again)");
+  const out = [header(result)];
   if (result.status === "running")
-    out.push(`(the program keeps running: \`mf cancel ${result.taskId}\` stops it; its end comes as a task.completed report)`);
-  const reports = result.reports ?? [];
-  if (reports.length) {
-    out.push(`--- reports (${reports.length}) ---`);
-    for (const message of reports) out.push(report(message));
-  } else if (result.status === "inbox") out.push("no new reports");
-  if (result.moreReports)
-    out.push(`(${result.moreReports} more reports queued; \`mf inbox\` shows them)`);
-  if (result.accumulating?.length)
-    out.push(`(still accumulating, shown later: ${result.accumulating.join(", ")})`);
-  const dropped = result.droppedReports;
-  if (dropped?.overflow) out.push(`(${dropped.overflow} older reports dropped: queue full)`);
-  if (dropped?.expired) out.push(`(${dropped.expired} reports expired before they were shown)`);
+    out.push(`(the program keeps running: \`mf cancel ${result.taskId}\` stops it; its end goes to the log, source tasks)`);
   if (unreadLine(result)) out.push(unreadLine(result));
   process.stdout.write(`${out.join("\n")}\n`);
   // The exit code follows the program: 0 when it finished, 1 when it threw,
@@ -205,15 +168,11 @@ function print(result) {
   if (result.status === "not_started") process.exitCode = 75;
 }
 
-/** The line under a result when reports wait in the inbox. */
-let showUnread = true;
+/** The line under a result when the log has unread entries. */
 function unreadLine(result) {
   const u = result.unread;
-  if (!showUnread || !u?.reports) return "";
-  const parts = [`${u.reports} report${u.reports === 1 ? "" : "s"}`];
-  if (u.urgent) parts.push(`${u.urgent} urgent`);
-  if (u.stops) parts.push(`stop: ${u.stops.join(", ")}`);
-  return `(unread in \`mf inbox\`: ${parts.join(", ")})`;
+  if (!u?.entries) return "";
+  return `(unread in \`mf log\`: ${u.entries} entr${u.entries === 1 ? "y" : "ies"}${u.urgent ? `, ${u.urgent} urgent` : ""})`;
 }
 
 /** Program output as it arrives: stdout to stdout, stderr to stderr. */
@@ -222,6 +181,7 @@ function streamed(message) {
     process.stdout.write(
       `[started] task=${message.taskId}${message.character ? ` character=${message.character}` : ""}${message.logDir ? ` logs=${message.logDir}` : ""}\n`,
     );
+  else if (message.stream === "note") process.stdout.write(`${message.text}\n`);
   else if (message.stream === "stdout") process.stdout.write(message.text);
   else if (message.stream === "stderr") process.stderr.write(message.text);
 }
@@ -285,36 +245,25 @@ async function main() {
       process.stdout.write("Stopped\n");
       return;
     }
-    case "run":
-    {
+    case "run": {
       if (!rest[0]) throw new Error("usage: mf run [options] FILE [ARGS...]");
-      const { inboxWithin, ...runOptions } = options;
-      const startedAt = Date.now();
-      const result = await request(
-        { type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...runOptions },
-        streamed,
+      return print(
+        await request(
+          { type: "run", file: rest[0], args: rest.slice(1), cwd: process.cwd(), ...options },
+          streamed,
+        ),
       );
-      const inTime = inboxWithin !== undefined && Date.now() - startedAt <= inboxWithin * 1000;
-      // The inbox follows right after: no need to say what waits there.
-      showUnread = !inTime || !result.unread?.reports;
-      print(result);
-      if (inboxWithin === undefined) return;
-      if (!inTime) {
-        process.stdout.write(`(ran longer than ${inboxWithin}s: read \`mf inbox\` yourself)\n`);
-        return;
-      }
-      // The run's own connection is done; the inbox is a second request.
-      const exitCode = process.exitCode;
-      pendingAck();
-      print(await request({ type: "inbox" }));
-      process.exitCode = exitCode;
-      return;
     }
     case "cancel":
       if (!rest[0]) throw new Error("usage: mf cancel TASK_ID");
       return print(await request({ type: "cancel", taskId: rest[0] }));
-    case "inbox":
-      return print(await request({ type: "inbox", ...options }));
+    case "log": {
+      // Read straight from the files: it works with the supervisor stopped too.
+      const result = await readLog({ dir: join(stateDir, "log"), ...options });
+      process.stdout.write(result.text);
+      result.commit();
+      return;
+    }
     case "idle":
     {
       // Options may also come after on|off here.
@@ -337,7 +286,7 @@ async function main() {
     }
     default:
       process.stderr.write(
-        "usage: mf start | stop | run [--bot NAME] [--inbox S] [--read-only] [--keep] FILE [ARGS] | inbox [--again] [--full] | status | cancel TASK_ID | idle on|off | snapshot\n",
+        "usage: mf start | stop | run [--bot NAME] [--read-only] [--keep] FILE [ARGS] | log [--source A,B] [--bot NAME] [--since 10m | --all] [--raw] [--peek] | status | cancel TASK_ID | idle on|off | snapshot\n",
       );
       process.exitCode = 2;
   }
@@ -349,10 +298,7 @@ process.stdout.on("error", (error) => {
   throw error;
 });
 
-main().then(
-  // Every result has been printed by now: confirm it, then let go.
-  () => pendingAck(),
-).catch((error) => {
+main().catch((error) => {
   process.stderr.write(`mf: ${error.message}\n`);
   process.exitCode = 1;
 });

@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-// Default watchdog. The runtime starts this ordinary script at session start
-// (it appears in the task list as "default watchdog"). It watches your
-// character from outside your programs and reports long-running trouble: no
+// Background watchdog, off by default (`mf run --keep` this file, or
+// MF_DEFAULT_SCRIPTS=chat,watchdog). It watches your character from outside
+// your programs and logs long-running trouble (source `watchdog`): no
 // progress for minutes, walking in circles, cumulative wall contact (20 s in
-// the last 30 s), digging the
-// same block again and again, dying repeatedly in one place (urgent) and
-// repeating the same chat message. Each finding is reported once until the
-// situation changes; all unread findings share one report (`watchdog`). Stop it with mf cancel <taskId>, or copy it into
-// your working directory and change the thresholds passed to createTrendWatch.
-import { InboxClient, inboxSlot } from "../inbox/index.mjs";
+// the last 30 s), digging the same block again and again, dying repeatedly
+// in one place (urgent) and repeating the same chat message. Each finding is
+// logged once until the situation changes. To change the thresholds, copy it
+// into your working directory and change what is passed to createTrendWatch.
+import { LogClient } from "../log/client.mjs";
 import { createTrendWatch } from "../observation/trend-watch.mjs";
 
 const MOVES = ["forward", "back", "left", "right"];
@@ -21,24 +20,21 @@ const inventoryKey = (bot) =>
 /** Watch one connected bot; returns { close() }. */
 export function startTrendWatchdog({
   bot,
-  inbox,
+  log,
   sampleMs = 1000,
   now = Date.now,
   ...thresholds
 }) {
   const watch = createTrendWatch(thresholds);
-  const slot = inboxSlot(inbox, "watchdog", {
-    render: (findings, { omitted }) => ({
-      type: "watchdog",
-      findings,
-      ...(omitted ? { omittedOlderFindings: omitted } : {}),
-    }),
-    onError: (error) => console.error(`watchdog: report failed: ${error.message}`),
-  });
-  let seq = 0;
+  const writes = new Set();
   const send = (findings) => {
-    for (const finding of findings)
-      slot.put(++seq, { at: now(), ...finding }, { urgent: Boolean(finding.urgent) });
+    for (const { type, urgent, message, ...rest } of findings) {
+      const write = Promise.resolve(
+        log.post({ message, ...rest }, { type, ...(urgent ? { urgent: true } : {}) }),
+      ).catch((error) => console.error(`watchdog: log failed: ${error.message}`));
+      writes.add(write);
+      write.finally(() => writes.delete(write));
+    }
   };
   const timer = setInterval(() => {
     const entity = bot.entity;
@@ -65,9 +61,8 @@ export function startTrendWatchdog({
   bot.on("death", onDeath);
   bot.on("chat", onChat);
   return {
-    flush: () => slot.flush(),
+    flush: () => Promise.all([...writes]),
     close() {
-      slot.close();
       clearInterval(timer);
       bot.off("diggingCompleted", onDig);
       bot.off("death", onDeath);
@@ -80,7 +75,7 @@ export function startTrendWatchdog({
 export const control = false;
 
 export default async function watchdogProgram(bot, { signal }) {
-  const running = startTrendWatchdog({ bot, inbox: new InboxClient() });
+  const running = startTrendWatchdog({ bot, log: new LogClient({ source: "watchdog" }) });
   if (!signal) return running;
   if (signal.aborted) {
     running.close();

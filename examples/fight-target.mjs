@@ -1,7 +1,10 @@
-/** Attack the nearest currently observed entity among supplied entity IDs. */
+/**
+ * Attack the nearest currently observed entity among supplied entity IDs.
+ * The choice and the summary are printed as JSON lines into the program's
+ * own output, where `mf run` shows them.
+ */
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { InboxClient } from "../runtime/inbox/index.mjs";
 import { loadPvp, stopBot } from "./native.mjs";
 
 export default async function fightTarget(
@@ -11,7 +14,7 @@ export default async function fightTarget(
   const ids = args.map(Number);
   if (!ids.length || !ids.every(Number.isInteger))
     throw new Error("Usage: fight-target.mjs ENTITY_ID [ENTITY_ID ...]");
-  const inbox = new InboxClient();
+  const say = (data) => log(JSON.stringify(data));
   const pvp = loadPvp(bot);
   const combatId = randomUUID();
   const startedAt = Date.now();
@@ -38,7 +41,7 @@ export default async function fightTarget(
     if (!candidates.length)
       throw new Error("None of the supplied IDs is currently observed");
     target = candidates[0].entity;
-    await inbox.post({
+    say({
       type: "combat.decision",
       combatId,
       candidates: candidates.map(({ entity, distance }) => ({
@@ -48,12 +51,6 @@ export default async function fightTarget(
       })),
       selectedTargetId: target.id,
       reason: "Nearest currently observed entity among supplied IDs",
-    });
-    await inbox.upsert(`combat.phase:${combatId}`, {
-      type: "combat.phase",
-      combatId,
-      target: { id: target.id, name: target.name ?? null },
-      activity: "combat observation continues",
     });
     pvp.movements.canDig = false;
     await pvp.attack(target);
@@ -67,8 +64,7 @@ export default async function fightTarget(
     bot.off("death", onDeath);
     signal?.removeEventListener("abort", cancel);
     if (target)
-      try {
-        await inbox.post({
+      say({
           type: "combat.summary",
           combatId,
           target: { id: target.id, name: target.name ?? null },
@@ -80,9 +76,6 @@ export default async function fightTarget(
           status: outcome,
           note: "Attacks do not prove that a target was defeated.",
         });
-      } catch (error) {
-        log(`combat summary report failed: ${error.message}`);
-      }
     log(JSON.stringify({ status: signal?.aborted ? "cancelled" : "finished" }));
   }
 }

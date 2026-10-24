@@ -2,7 +2,7 @@
  * Runs participant modules inside the bot's own process, against the native
  * Mineflayer bot (native runtime only). A module exports
  *
- *   export default async function (bot, { signal, args, log }) { ... }
+ *   export default async function (bot, { signal, args, log, watchdog }) { ... }
  *
  * and is started by `run.mjs` over a Unix socket. Each run gets the real bot
  * through a thin wrapper that records the listeners it adds; when the run
@@ -13,6 +13,12 @@
  * the next program or idle takes over; read-only modules
  * (`export const control = false`) leave them alone. console output during a
  * run goes to that run's client (inside a listener callback, use `log`).
+ *
+ * A controlling run gets the watchdog (../../watchdog.mjs) by default: its
+ * findings (stuck, repeating the same failure) are printed into the run's own
+ * output as `[watchdog] ...` lines, and the run gets it as `watchdog` to call
+ * `failure(error)`, `pause()` or `resume()`. `export const watchdog = false`
+ * turns it off; an object (`{ stuckMs: 30000 }`) sets its options.
  *
  * Everything shares one process: a synchronous loop in one module stops the
  * bot and every other run until it returns.
@@ -32,6 +38,7 @@ import net from "node:net";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { format } from "node:util";
+import { watchdog as startWatchdog } from "../../watchdog.mjs";
 
 const LISTEN = [
   "on",
@@ -47,8 +54,8 @@ let patched = false;
 function patchGlobals() {
   if (patched) return;
   patched = true;
-  // A run reads its own task's variables (MC_INBOX_TASK_ID, ...) from
-  // process.env, so an InboxClient created in a run reports as that task.
+  // A run reads its own task's variables (MF_TASK_ID, ...) from
+  // process.env, so a LogClient created in a run writes as that task.
   const env = process.env;
   process.env = new Proxy(env, {
     get: (target, key) => {
@@ -184,7 +191,7 @@ export async function startRunner({
       env: Object.fromEntries(
         Object.entries(request.env ?? {}).filter(
           ([key, value]) =>
-            /^(?:MC_INBOX_|MF_TASK_|ARENA_TASK_)/.test(key) &&
+            /^(?:MF_TASK_|MF_LOG_|ARENA_TASK_)/.test(key) &&
             typeof value === "string",
         ),
       ),
@@ -220,6 +227,7 @@ export async function startRunner({
     });
     active.add(state);
     let result;
+    let dog;
     try {
       const file = isAbsolute(request.file)
         ? request.file
@@ -230,10 +238,19 @@ export async function startRunner({
         const main = module.default ?? module.main;
         if (typeof main !== "function")
           throw new Error(`${request.file} has no default export function`);
-        return main(runBot(bot, listeners), {
+        const view = runBot(bot, listeners);
+        if (state.control && module.watchdog !== false)
+          dog = startWatchdog(view, {
+            // A blocked loop is the supervisor's: it restarts the process.
+            blockedMs: 0,
+            ...(module.watchdog && typeof module.watchdog === "object" ? module.watchdog : {}),
+            report: (event) => state.write(`[watchdog] ${event.message}`),
+          });
+        return main(view, {
           signal: controller.signal,
           args: request.args ?? [],
           log: (...args) => state.write(format(...args)),
+          ...(dog ? { watchdog: dog } : {}),
         });
       });
       result = { type: "done", ok: !cancelled, cancelled, value: plain(value) };
@@ -246,6 +263,9 @@ export async function startRunner({
       };
     } finally {
       clearTimeout(cancelTimer);
+      try {
+        dog?.close();
+      } catch {}
       state.finished = true;
       active.delete(state);
       for (const [event, fn] of listeners) bot.removeListener(event, fn);

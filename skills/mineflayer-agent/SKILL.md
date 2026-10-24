@@ -14,21 +14,23 @@ First check whether a character is already running for you: `mf status` (or `npx
 ```sh
 export MF_USERNAME=Steve MF_HOST=localhost
 npx mf start                  # connects the character and keeps it alive
-npx mf run --inbox 30 look.mjs   # wait for it; if it ends within 30 s, the latest reports follow
-npx mf run walk.mjs 100 -40      # long program: start it with your tool's background shell
-npx mf inbox                     # what happened in the game since you last read it, at once
+npx mf run look.mjs           # short program: wait for it
+npx mf run walk.mjs 100 -40   # long program: start it with your tool's background shell
+npx mf log                    # what happened in the game since you last read it, summed up
 npx mf cancel <taskId>        # stop a program (stopping the shell command does not)
 ```
 
 A module is `export default async function (bot, { signal, args, log }) { ... }`: the real bot, an abort signal, its arguments. The function ending is the program ending.
 
-- **Keep working while the character acts.** Wait in the foreground only for a program that is short (a look, one action) and whose result you need before doing anything else; run anything that walks, fights, gathers or might take longer in the background of your own tool, so you can check `mf inbox` and correct it while it runs; your harness tells you when they end. `mf run` only prints the program's output and result; read `mf inbox` whenever you want to know what is going on in the game. It can go beside a background run in the same batch of calls. When you wait for a program, estimate how long it needs and pass `--inbox S` with S no longer than your tool's foreground wait (if you do not know that wait, use 20).
+- **Short steps that end on a decision.** Each program does one piece of work and ends when it is done, when it found what it looked for, or when it needs you to decide (say why in its result). It prints one line at each milestone (arrived, found, opened, crafted), so its output shows how far it got.
+- **Keep working while the character acts.** Wait in the foreground only for a short program whose result you need next; run anything that walks, fights or gathers in your tool's background shell, with a wait no longer than you would go without news (often 30 to 90 seconds). When the wait ends without a new milestone line, read its output and `mf log`, then let it go on or `mf cancel` it.
 - **One controlling program per character.** A new `mf run` replaces the running one. Modules with `export const control = false` only read and run beside it. Do not put two controlling runs for the same character in one batch of parallel calls.
 - **Write programs that cope rather than stop.** Handle foreseeable trouble in code (another path, eating, fighting back, retrying a step) instead of ending at the first surprise; check few assumptions up front.
-- **Tell yourself without stopping.** An urgent report (a program's `requestJudgment`, critical health, chat that names you when enabled) makes a waiting `mf run` return at once as `running` while the program keeps going. Check whether it still makes progress (`mf inbox`, its logs); if it does, let it run and wait, or write the next program meanwhile; replace it only when it is stuck or wrong.
-- **End a program when it cannot go on usefully:** the goal is done, its deadline passed, the same step kept failing, or it met something it cannot handle. Return what you need to decide in its result.
-- **Stops stop programs.** A death, a dimension change or a crashed process interrupts the character's program, and `mf run` comes back `not_started` until you have read the stop in `mf inbox` (or with `--inbox S`, which reads it right after).
+- **Urgent news comes back early.** An urgent log entry (critical health with the danger module, chat that names you when enabled, a program's `{ urgent: true }` entry) makes a waiting `mf run` return at once as `running`, with only the reason; read `mf log` for the rest. The program keeps going.
+- **Stops stop programs.** A death, a dimension change or a crashed process interrupts the character's program; the next `mf run` starts by printing what stopped it.
+- **Every controlling program has a watchdog.** When the character tries to move but does not, or the same failure repeats, a `[watchdog] …` line appears in the program's output; `export const watchdog = false` turns it off.
 - **When a program ends, the character stops walking and fighting**, so wait for a walk inside the program. While a program runs, keeping the character alive is that program's job; only between programs does it defend itself, eat and float on its own; put your own `idle.mjs` in the working directory to change that, or `mf idle off`.
+- **More in the background when you want it.** Only chat is logged by default. `mf run --keep $MF_TOOLKIT_ROOT/runtime/default-scripts/danger.mjs` (damage and threats, urgent), `radar.mjs` (who comes and goes), `explore.mjs` (blocks and signs you pass) or `watchdog.mjs` (trends over minutes) add their own section to `mf log`.
 
 Details: [runtime/README.md](../../runtime/README.md).
 
@@ -75,7 +77,7 @@ bot.on("error", (error) => console.log("error", error.message));
 | Remember chunks after they unload | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`. |
 | A picture of the terrain or a structure | `mineflayer-world-memory/live.mjs`: `observationViewBounds`, `surfaceSnapshotFromBot` + `renderTexturedSurface`, `snapshotFromBot` + `renderOblique`, `saveRender` (see `docs/live-visual.md`). Blank means not received, not air. |
 | The logs of one tree before chopping | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`. |
-| Notice a stuck or looping program | Under `mf`: ``(await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`)).watchdog(bot)``, which reports into `mf inbox`. Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
+| Notice a stuck or looping program | Under `mf` every controlling program has one: its findings are `[watchdog]` lines in the program's output (`watchdog.failure(error)` counts an error you caught). Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
 | One full sample of your state | `mf snapshot` |
 
 ## Example programs

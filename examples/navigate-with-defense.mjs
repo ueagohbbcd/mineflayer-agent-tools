@@ -1,16 +1,17 @@
-/** Inbox example: a finite trip with a small, explicit close-range defense policy.
- * Focus on the reports: selected observation evidence, actual controller choices,
- * native combat summaries and whether the original trip really resumed.
+/** A finite trip with a small, explicit close-range defense policy.
+ * Focus on the reports (`reporter.post(data, { key })`): selected observation
+ * evidence, actual controller choices, native combat summaries and whether the
+ * original trip really resumed. Run as a program, they are JSON lines in its
+ * own output.
  */
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import { sampleObservation } from "../runtime/observation/index.mjs";
-import { InboxClient } from "../runtime/inbox/index.mjs";
 import { loadPathfinder, loadPvp, stopBot } from "./native.mjs";
 
 export async function navigateWithDefense(
   bot,
-  inbox,
+  reporter,
   goal,
   {
     signal,
@@ -39,8 +40,9 @@ export async function navigateWithDefense(
     selection = null,
     lastScan = -Infinity,
     lastProgress = -Infinity;
-  const report = (method, ...args) => {
-    const p = Promise.resolve().then(() => inbox[method](...args));
+  // key: a progress line that only its newest version matters for.
+  const report = (data, key) => {
+    const p = Promise.resolve().then(() => reporter.post(data, key ? { key } : {}));
     pending.add(p);
     p.catch((error) => {
       result.reportErrors++;
@@ -75,20 +77,19 @@ export async function navigateWithDefense(
       candidates = candidatesFrom(state);
     if (now() - lastProgress >= 2000) {
       lastProgress = now();
-      // Progress is replaceable: only the newest undelivered route fact matters.
-      // Normal upsert waits for a natural tool boundary; it does not wake the model.
-      report("upsert", "journey.progress", {
+      // Progress is replaceable: only the newest route fact matters.
+      report({
         type: "journey.progress",
         activity: "navigating",
         position: state.self.position,
         health: state.self.health,
         nearbyPotentialThreats: candidates.length,
-      });
+      }, "journey.progress");
     }
     if (!candidates.length) return;
     selection = { state, candidates, targetId: candidates[0].id };
     // Save this decision's evidence now. Later combat ticks may show different entities.
-    report("post", {
+    report({
       type: "combat.decision",
       candidates,
       selectedTargetId: selection.targetId,
@@ -129,7 +130,7 @@ export async function navigateWithDefense(
           at: now(),
           meaning: "original goal and Movements restored; arrival pending",
         };
-        report("post", resumeReport);
+        report(resumeReport);
         result.resumed++;
         resumeReport = null;
       }
@@ -152,7 +153,7 @@ export async function navigateWithDefense(
       const chosen = selection,
         target = bot.entities[chosen.targetId];
       if (!target) {
-        report("post", {
+        report({
           type: "journey.defense_skipped",
           targetId: chosen.targetId,
           reason: "selected entity no longer observed at the pause",
@@ -197,7 +198,7 @@ export async function navigateWithDefense(
           stopReason = "defense_window_elapsed";
         else await pause(100, undefined, { signal });
       }
-      report("post", { type: "combat.stop", reason: stopReason });
+      report({ type: "combat.stop", reason: stopReason });
       await bot.pvp.stop();
       // entityGone may already have started native stop before our own call.
       // Wait for its actual event before restoring the route.
@@ -234,8 +235,8 @@ export async function navigateWithDefense(
     bot.off("end", onEnd);
     signal.removeEventListener("abort", externalAbort);
     controller.abort(); // Remove a pending native-event wait after failure.
-    if (resumeReport) report("post", resumeReport);
-    report("post", {
+    if (resumeReport) report(resumeReport);
+    report({
       type: "combat.stop",
       reason: result.error ?? result.status,
     });
@@ -244,15 +245,14 @@ export async function navigateWithDefense(
     bot.deactivateItem();
     bot.clearControlStates();
 
-    // Final event is distinct history, not a replacement for progress. The final
-    // stdout also survives Inbox TTL and states whether this program has exited.
-    report("upsert", "journey.progress", {
+    // Final event is distinct history, not a replacement for progress.
+    report({
       type: "journey.progress",
       activity: "controller stopped",
       status: result.status,
       position: { ...bot.entity.position },
-    });
-    report("post", {
+    }, "journey.progress");
+    report({
       type: "journey.finished",
       ...result,
       activity: "controller stopped",
@@ -273,7 +273,12 @@ export default async function navigateWithDefenseProgram(
   const xyz = args.map(Number);
   if (xyz.length !== 3 || !xyz.every(Number.isFinite))
     throw new Error("Usage: navigate-with-defense.mjs X Y Z");
-  const inbox = new InboxClient();
+  // Decisions and the end as output lines; progress (keyed) is left out.
+  const reporter = {
+    post: async (data, { key } = {}) => {
+      if (!key) log(JSON.stringify(data));
+    },
+  };
   loadPvp(bot);
   const { Movements, goals } = loadPathfinder(bot);
   const movements = new Movements(bot);
@@ -283,7 +288,7 @@ export default async function navigateWithDefenseProgram(
   try {
     const result = await navigateWithDefense(
       bot,
-      inbox,
+      reporter,
       new goals.GoalNear(...xyz, 1),
       { signal },
     );

@@ -29,7 +29,7 @@ To let an agent play Minecraft through Mineflayer, give it the
 control programs, and guides for moving, looking, items and survival. It runs
 programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
 `mf run program.mjs` runs a program on the character (in the background of
-your own tool for long ones) and `mf inbox` reads what happened in the game.
+your own tool for long ones) and `mf log` shows what happened in the game.
 Node 22 or newer.
 
 ## Optional historical world memory

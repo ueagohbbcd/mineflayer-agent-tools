@@ -1,6 +1,6 @@
 /** Read-only participant radar. No hostility assumptions or automatic movement. */
 import { setTimeout as sleep } from "node:timers/promises";
-import { InboxClient } from "../runtime/inbox/index.mjs";
+import { LogClient } from "../runtime/log/index.mjs";
 
 const vector = (p) => ({ x: p.x, y: p.y, z: p.z });
 export function sampleEntities(
@@ -49,29 +49,35 @@ export function sampleEntities(
 }
 
 // Embed beside your action loop, or run the CLI once as a separate observation task.
-// judge(sample) optionally returns participant-authored facts/question, or null.
+// Each changed sample goes to the log under one key (`mf log` shows the newest).
+// judge(sample) optionally returns participant-authored facts/question, or null;
+// a new one is logged as urgent, which wakes the model.
 export async function watchEntities(
   bot,
-  inbox,
+  log,
   {
     radius = 32,
     limit = 24,
     intervalMs = 1000,
-    ttlMs = 5000,
     judge,
     cooldownMs = 30_000,
     signal,
   } = {},
 ) {
-  for (const value of [intervalMs, ttlMs, cooldownMs])
+  for (const value of [intervalMs, cooldownMs])
     if (!Number.isFinite(value) || value <= 0)
       throw new Error("Radar intervals must be positive");
   let lastJudgment = -Infinity,
-    activeKey = null;
+    activeKey = null,
+    last = null;
   try {
     while (!signal?.aborted) {
       const sample = sampleEntities(bot, { radius, limit });
-      await inbox.upsert("nearby.entities", sample, { ttlMs });
+      const seen = JSON.stringify(sample.entities.map((e) => [e.id, e.position]));
+      if (seen !== last) {
+        last = seen;
+        await log.post(sample, { key: "nearby.entities" });
+      }
       const question = judge?.(sample);
       const key = question ? (question.key ?? "radar-threat") : null;
       if (!question) activeKey = null;
@@ -82,7 +88,7 @@ export async function watchEntities(
       ) {
         lastJudgment = performance.now();
         activeKey = key;
-        await inbox.requestJudgment({ ...question, radar: sample });
+        await log.post({ ...question, radar: sample }, { type: "judgment", urgent: true });
       }
       await sleep(intervalMs, undefined, { signal });
     }
@@ -105,10 +111,9 @@ export default async function entityRadarProgram(
   const radius = Number(args[0] ?? 32),
     intervalMs = Number(args[1] ?? 1000);
   try {
-    await watchEntities(bot, new InboxClient(), {
+    await watchEntities(bot, new LogClient({ source: "entity-radar" }), {
       radius,
       intervalMs,
-      ttlMs: Math.max(5000, intervalMs * 3),
       signal,
     });
   } finally {

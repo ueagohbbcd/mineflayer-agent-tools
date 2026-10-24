@@ -2,13 +2,14 @@
 // model controls the character, and stops it before the next one starts. It
 // never sets a pathfinder goal or chases anything: it fights hostile mobs
 // within reach, eats when hungry and keeps its head above water. A summary of
-// what it did is reported (state key "idle") at most every few seconds.
+// what it did goes to the log (source `idle`, key "idle") at most every few
+// seconds.
 //
 // Replace it with `idle.mjs` in the working directory: the same shape, a
 // default export `(bot, { signal, log })`. The supervisor loads the newest
 // version each time the character becomes idle, and falls back to this file
-// (with a report) when yours fails.
-import { InboxClient } from "../inbox/index.mjs";
+// (with a log entry) when yours fails.
+import { LogClient } from "../log/client.mjs";
 
 const REACH = 3.5;
 const HUNGRY = 14;
@@ -117,12 +118,12 @@ export async function idle(bot, { signal, report = () => {} } = {}) {
 }
 
 export default async function idleProgram(bot, { signal }) {
-  const inbox = new InboxClient();
+  const log = new LogClient({ source: "idle" });
   await idle(bot, {
     signal,
     report: (data) =>
-      void inbox
-        .upsert("idle", data)
-        .catch((error) => console.error(`idle: report failed: ${error.message}`)),
+      void log
+        .post(data, { key: "idle" })
+        .catch((error) => console.error(`idle: log failed: ${error.message}`)),
   });
 }

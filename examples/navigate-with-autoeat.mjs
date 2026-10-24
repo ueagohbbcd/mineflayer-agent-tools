@@ -1,6 +1,9 @@
-/** Inbox example: report each meal's cause, observed changes and route recovery. */
+/**
+ * Walk to a goal and eat on the way: each meal's cause, observed changes and
+ * route recovery are reported through `reporter.post(report)`. Run as a
+ * program, the reports are JSON lines in its own output.
+ */
 import { once } from "node:events";
-import { InboxClient } from "../runtime/inbox/index.mjs";
 import { loadPathfinder, stopBot } from "./native.mjs";
 
 const foods = new Set([
@@ -23,7 +26,7 @@ function abortable(promise, signal) {
 
 export async function navigateWithAutoeat(
   bot,
-  inbox,
+  reporter,
   goal,
   { signal, now = Date.now, foodBelow = 14 } = {},
 ) {
@@ -53,7 +56,7 @@ export async function navigateWithAutoeat(
   });
   const send = async (report) => {
     try {
-      await inbox.post(report);
+      await reporter.post(report);
     } catch (error) {
       food.reportErrors++;
       report.deliveryError = error.message;
@@ -239,7 +242,7 @@ export default async function navigateWithAutoeatProgram(
   const xyz = args.filter((arg) => arg !== "--no-dig").map(Number);
   if (xyz.length !== 3 || !xyz.every(Number.isFinite))
     throw new Error("Usage: navigate-with-autoeat.mjs X Y Z [--no-dig]");
-  const inbox = new InboxClient();
+  const reporter = { post: async (report) => log(JSON.stringify(report)) };
   const { Movements, goals } = loadPathfinder(bot);
   const moves = new Movements(bot);
   if (noDig) moves.canDig = false;
@@ -247,7 +250,7 @@ export default async function navigateWithAutoeatProgram(
   try {
     const result = await navigateWithAutoeat(
       bot,
-      inbox,
+      reporter,
       new goals.GoalNear(...xyz, 1),
       { signal },
     );

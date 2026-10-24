@@ -117,19 +117,18 @@ test("repeated deaths in one place are urgent; repeated digs and chat are not", 
   assert.equal(chat[0].urgent, false);
 });
 
-test("the default watchdog script keeps its unread findings in one report", async (t) => {
+test("the background watchdog logs each finding once, urgent only for repeated deaths", async (t) => {
   const { EventEmitter } = await import("node:events");
-  const { Inbox, localInboxClient } = await import("../../runtime/inbox/index.mjs");
   const { startTrendWatchdog } =
     await import("../../runtime/default-scripts/watchdog.mjs");
   const bot = new EventEmitter();
   bot.username = "arena_red1";
   bot.entity = { position: { x: 0, y: 64, z: 0 } };
   bot.inventory = { items: () => [] };
-  const inbox = new Inbox({ sessionId: "watchdog" });
+  const posted = [];
   const running = startTrendWatchdog({
     bot,
-    inbox: localInboxClient(inbox),
+    log: { post: async (data, opts) => posted.push({ data, ...opts }) },
     sampleMs: 60_000,
   });
   t.after(() => running.close());
@@ -138,12 +137,12 @@ test("the default watchdog script keeps its unread findings in one report", asyn
   bot.emit("chat", "someone", "hi");
   for (let i = 0; i < 3; i++) bot.emit("chat", "arena_red1", "wool?");
   await running.flush();
-  assert.equal(inbox.items.length, 1);
-  const [{ message }] = inbox.items;
-  assert.equal(message.key, "watchdog");
-  assert.equal(message.priority, "urgent");
   assert.deepEqual(
-    message.data.findings.map((finding) => finding.type),
-    ["repeat_death", "repeat_chat"],
+    posted.map((p) => [p.type, p.urgent ?? false]),
+    [
+      ["repeat_death", true],
+      ["repeat_chat", false],
+    ],
   );
+  assert.match(posted[0].data.message, /Died 2 times/);
 });
