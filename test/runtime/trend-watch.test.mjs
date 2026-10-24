@@ -62,6 +62,39 @@ test("walking far over a few cells is circling; walking into a wall is reported"
   );
 });
 
+test("intermittent wall collisions accumulate across brief releases and re-arm after the window expires", () => {
+  const watch = createTrendWatch();
+  const contact = (s, moving) => watch.sample({
+    t: s * 1000,
+    position: { x: 10, y: 64, z: 10 },
+    moving,
+    collided: moving,
+  }).filter((finding) => finding.type === "against_wall");
+  const found = [];
+  for (let s = 0; s <= 29; s++)
+    found.push(...contact(s, s > 0 && s % 5 !== 0)); // 4 s pressing, 1 s released
+  assert.equal(found.length, 1);
+  assert.equal(found[0].seconds, 20);
+  assert.equal(found[0].windowSeconds, 30);
+  for (let s = 30; s <= 60; s++)
+    assert.deepEqual(contact(s, false), [], "do not repeat while wall contact decays");
+  const again = [];
+  for (let s = 61; s <= 90; s++)
+    again.push(...contact(s, s % 5 !== 0));
+  assert.equal(again.length, 1, "a new independent episode can report");
+});
+
+test("wall time is not invented across a missing sampling interval", () => {
+  const watch = createTrendWatch({ wallMs: 3000, wallWindowMs: 30000 });
+  const pos = { x: 0, y: 64, z: 0 };
+  const sample = (t) => watch.sample({ t, position: pos, moving: true, collided: true });
+  assert.deepEqual(sample(0), []);
+  assert.deepEqual(sample(25000), [], "a 25 s observation gap is not 25 s of wall contact");
+  assert.deepEqual(sample(26000), []);
+  assert.deepEqual(sample(27000), []);
+  assert.equal(sample(28000)[0]?.type, "against_wall");
+});
+
 test("repeated deaths in one place are urgent; repeated digs and chat are not", () => {
   const watch = createTrendWatch();
   assert.deepEqual(watch.death({ t: 0, position: { x: 0, y: 60, z: 0 } }), []);
