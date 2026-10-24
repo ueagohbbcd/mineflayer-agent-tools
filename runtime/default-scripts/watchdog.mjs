@@ -2,7 +2,8 @@
 // Default watchdog. The runtime starts this ordinary script at session start
 // (it appears in the task list as "default watchdog"). It watches your
 // character from outside your programs and reports long-running trouble: no
-// progress for minutes, walking in circles, walking into a wall, digging the
+// progress for minutes, walking in circles, cumulative wall contact (20 s in
+// the last 30 s), digging the
 // same block again and again, dying repeatedly in one place (urgent) and
 // repeating the same chat message. Each finding is reported once until the
 // situation changes; all unread findings share one report (`watchdog`). Stop it with mf cancel <taskId>, or copy it into

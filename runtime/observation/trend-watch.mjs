@@ -17,9 +17,13 @@ export const trendDefaults = {
   circleMinPath: 80,
   circleMaxCells: 12,
   teleportDistance: 30, // a jump this far between samples is not walking
-  // Against a wall: a movement key held, horizontal collision, almost no
-  // horizontal movement, continuously for this long.
+  // Against a wall: at least wallMs of moving + collision + negligible
+  // horizontal displacement accumulated inside wallWindowMs, not necessarily
+  // continuously. Briefly releasing a key should not reset the evidence.
   wallMs: 20_000,
+  wallWindowMs: 30_000,
+  // Unknown periods between samples must not be counted as wall contact.
+  wallMaxSampleGapMs: 2_000,
   // Repeats within repeatWindowMs.
   repeatWindowMs: 600_000,
   repeatDeaths: 2, // deaths within deathRadius of each other (urgent)
@@ -45,8 +49,8 @@ export function createTrendWatch(options = {}) {
   let lastNewChunkAt, lastInventory, lastInventoryAt, lastDigAt;
   let idleReported = false,
     circleReported = false,
-    wallSince = null,
     wallReported = false;
+  const wallIntervals = []; // { start, end } for observed wall contact
   const deaths = [],
     digs = new Map(),
     chats = new Map();
@@ -153,28 +157,38 @@ export function createTrendWatch(options = {}) {
         });
       }
 
-      // Against a wall.
+      // Against a wall: accumulate observed contact over a sliding window.
+      // A single clear sample does not erase previous contact; old samples
+      // naturally expire. Do not infer continuous contact over missing ticks.
       const previous = samples.at(-2);
-      const stalled =
+      const wallStart = t - o.wallWindowMs;
+      while (wallIntervals.length && wallIntervals[0].end <= wallStart)
+        wallIntervals.shift();
+      const dt = previous ? t - previous.t : 0;
+      if (
         moving &&
         collided &&
-        previous &&
-        flat(previous.p, position) < 0.1 * ((t - previous.t) / 1000 || 1);
-      if (!stalled) {
-        wallSince = null;
-        wallReported = false;
-      } else {
-        wallSince ??= previous.t;
-        if (!wallReported && t - wallSince >= o.wallMs) {
-          wallReported = true;
-          found.push({
-            type: "against_wall",
-            urgent: false,
-            seconds: Math.round((t - wallSince) / 1000),
-            position: where(position),
-            message: `Walking into a wall for ${Math.round((t - wallSince) / 1000)} s without moving.`,
-          });
-        }
+        dt > 0 &&
+        dt <= o.wallMaxSampleGapMs &&
+        flat(previous.p, position) < 0.1 * (dt / 1000)
+      ) {
+        wallIntervals.push({ start: previous.t, end: t });
+      }
+      const wallMs = wallIntervals.reduce(
+        (ms, segment) => ms + Math.max(0, segment.end - Math.max(segment.start, wallStart)),
+        0,
+      );
+      if (wallMs < o.wallMs) wallReported = false;
+      else if (!wallReported) {
+        wallReported = true;
+        found.push({
+          type: "against_wall",
+          urgent: false,
+          seconds: Math.round(wallMs / 1000),
+          windowSeconds: Math.round(o.wallWindowMs / 1000),
+          position: where(position),
+          message: `Pressed against a wall for ${Math.round(wallMs / 1000)} s in the last ${Math.round(o.wallWindowMs / 1000)} s, without meaningful movement.`,
+        });
       }
       return found;
     },
