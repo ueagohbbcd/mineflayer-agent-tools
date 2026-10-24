@@ -78,6 +78,29 @@ bot.on("error", (error) => console.log("error", error.message));
 | Notice a stuck or looping program | Under `mf`: ``(await import(`${process.env.MF_TOOLKIT_ROOT}/runtime/observation/watchdog.mjs`)).watchdog(bot)``, which reports into `mf inbox`. Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
 | One full sample of your state | `mf snapshot` |
 
+## Example programs
+
+`examples/` holds short programs that each show one way to do a task. They are examples, not a fixed toolset: read one to see how it is done, then run it as it is or copy it into your directory and change it. Under `mf`, run one as `mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z`; its first comment says how to call it.
+
+| Example | Shows |
+| ------- | ----- |
+| [navigate.mjs](../../examples/navigate.mjs) | A Pathfinder trip that ends when it arrives, fails or stalls. |
+| [navigate-with-defense.mjs](../../examples/navigate-with-defense.mjs) | A trip with a small close-range defense, reporting each fight. |
+| [navigate-with-autoeat.mjs](../../examples/navigate-with-autoeat.mjs) | A trip that eats on the way and resumes the route. |
+| [fight-target.mjs](../../examples/fight-target.mjs) | Attacking a chosen entity with PvP. |
+| [build-with-autoeat.mjs](../../examples/build-with-autoeat.mjs) | Placing a planned list of blocks, eating between steps. |
+| [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs) | Checking that no entity blocks a placement (read-only). |
+| [reach-map.mjs](../../examples/reach-map.mjs) | Where you can walk from here and back, as a text map (read-only). |
+| [profile.mjs](../../examples/profile.mjs) | The ground along a line: walls, drops, water (read-only). |
+| [place-graph.mjs](../../examples/place-graph.mjs) | Which of your waypoints connect, and how (read-only). |
+| [summarize-terrain.mjs](../../examples/summarize-terrain.mjs) | Local terrain and connectivity as numbers (read-only). |
+| [watch-surroundings.mjs](../../examples/watch-surroundings.mjs) | Waiting until a kind of block shows up nearby, then ending. |
+| [entity-radar.mjs](../../examples/entity-radar.mjs) | Nearby entities as one report kept up to date (read-only). |
+| [query-block-memory.mjs](../../examples/query-block-memory.mjs) | One block, live first, history only for unloaded chunks (read-only). |
+| [native.mjs](../../examples/native.mjs) | Loading Pathfinder and PvP once on the shared bot; the other examples import it. |
+
+The examples import `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3`; install them beside this package.
+
 ## Guides
 
 Read the one you need:

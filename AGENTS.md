@@ -7,11 +7,13 @@ For contributors to this repository. Agents that play through it read `skills/mi
 - **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `runtime/`, never touch a report queue, and take a callback for anything they report.
 - **Runtime** (`runtime/`, the `mf` command): character processes, one controlling program per character, the report queue (`mf inbox`), default modules, idle. Telling a model when a background command ends is the harness's job, not the runtime's.
 
+Example programs (`examples/*.mjs`) sit on top of both: short `mf` modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique; two examples that do similar things in different ways stay separate. Their tests are in `test/examples/`.
+
 Scope and what not to build: [docs/project-scope.md](docs/project-scope.md).
 
 ## Who consumes it
 
-craft-arena installs this package (name `mineflayer-world-memory`) from a codeload tarball of a commit and runs `runtime/supervisor.mjs` for its characters; its participant image drops `skills/`. A change here reaches the arena only when the arena bumps that commit, so run the arena's tests and `npm run verify:server` against a new commit before calling it done.
+craft-arena installs this package (name `mineflayer-world-memory`) from a codeload tarball of a commit and runs `runtime/supervisor.mjs` for its characters; its participant image drops `skills/` but keeps `examples/`, which its own skills point to. The arena also installs the dependencies its images need for parts of this package (for example the renderer's), since participant containers have no network. A change here reaches the arena only when the arena bumps that commit, so run the arena's tests and `npm run verify:server` against a new commit before calling it done.
 
 ## Checks
 

@@ -164,6 +164,10 @@ sealed blocks. `ready`, exact reads and metadata reads do not request analysis.
 `chunk()` returns the underlying native object for existing compatibility;
 services should serialize it or wrap getters rather than expose mutation.
 
+## Example programs
+
+`examples/*.mjs` are short `mf` modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z`) or copy and change them. The list is in [the skill](skills/mineflayer-agent/SKILL.md#example-programs). They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
+
 ## Tests
 
 ```sh
