@@ -1,6 +1,6 @@
 # Developer guide
 
-For contributors to this repository. Agents that play through it read `skills/mineflayer-agent/SKILL.md` and `runtime/README.md` instead.
+For contributors to this repository. Agents that play through it read `skills/mf-basics/SKILL.md` (then the `mineflayer-*` skills it lists) and `runtime/README.md` instead.
 
 ## Two layers
 

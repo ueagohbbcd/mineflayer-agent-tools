@@ -1,3 +1,8 @@
+---
+name: mineflayer-surroundings
+description: "Looking at the world from a Mineflayer bot: which chunks it knows, reading blocks live first with history only for unloaded chunks, entities, players and signs, pictures of terrain and structures, finding one tree's logs, and the radar and explore background modules. Use when a decision depends on what is around the character."
+---
+
 # Looking at the world
 
 ## What the bot knows
@@ -47,3 +52,14 @@ North is up. Blank cells were not received. `snapshotFromBot` + `renderOblique` 
 ## Trees
 
 `queryTreeCandidate({ blockAt: (p) => bot.blockAt(p), seed })` from `mineflayer-world-memory/queries.mjs` turns one log into the connected logs of that tree, with leaf evidence and where the search stopped. Your program decides which logs to dig.
+
+## In the background, under `mf`
+
+`mf run --keep "$MF_TOOLKIT_ROOT/runtime/default-scripts/radar.mjs"` logs players and named entities coming and going, where players are, mob counts and drops; `explore.mjs` logs blocks you have not seen before and sign text, and `mf log` sums the blocks up as types and counts. Both are read-only and write to `mf log`.
+
+## Examples
+
+- [watch-surroundings.mjs](../../examples/watch-surroundings.mjs): waits until a kind of block shows up nearby, then ends.
+- [entity-radar.mjs](../../examples/entity-radar.mjs): nearby entities, logged when they change (read-only).
+- [summarize-terrain.mjs](../../examples/summarize-terrain.mjs): local terrain and connectivity as numbers (read-only).
+- [query-block-memory.mjs](../../examples/query-block-memory.mjs): one block, live first, history only for unloaded chunks (read-only).
