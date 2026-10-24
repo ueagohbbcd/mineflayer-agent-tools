@@ -72,6 +72,10 @@ async function harness(t) {
       bot.entity.position.x = x;
       tick();
     },
+    resolveAt(position) {
+      bot.entity.position = position;
+      resolve();
+    },
     async arrive() {
       bot.entity.position = new Vec3(10, 1, 0);
       resolve();
@@ -125,3 +129,26 @@ for (const name of ["SIGTERM", "SIGINT"]) {
     assert.equal(h.bot.listenerCount("path_update"), 0);
   });
 }
+
+test("arrival counts the cell above the feet, as Pathfinder's goal_reached does", async (t) => {
+  const h = await harness(t);
+  h.resolveAt(new Vec3(10.5, -2, 0.5)); // the feet miss GoalNear; the cell above meets it
+  const result = await h.done;
+  assert.equal(result.status, "arrived");
+  assert.equal(result.reason, "pathfinder_goal_reached");
+  assert.deepEqual(result.goal, [10, 1, 0]);
+});
+
+test("goto resolving far from the goal (an empty path) is a failure with the last path status", async (t) => {
+  const h = await harness(t);
+  h.bot.emit("path_update", { status: "noPath", path: [] });
+  h.resolveAt(new Vec3(5, 1, 0));
+  await assert.rejects(h.done, (error) => {
+    assert.equal(error.name, "NotReached");
+    assert.match(
+      error.message,
+      /Pathfinder NotReached, last path noPath, goal 10 1 0, at \(5, 1, 0\)/,
+    );
+    return true;
+  });
+});

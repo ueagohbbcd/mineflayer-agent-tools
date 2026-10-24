@@ -21,7 +21,7 @@ Useful goals: `GoalBlock` (stand in that cell), `GoalNear` (within a range), `Go
 
 ## Check arrival
 
-`goto` resolving means Pathfinder reached its goal by its own test. If the next step needs an exact spot, check `bot.entity.position` yourself (for example X and Z equal after `floored()`, Y within one block).
+`goto` resolves when Pathfinder emits `goal_reached`, but also on an empty path, which it reports for some cases with no route. So after `goto`, check arrival the way Pathfinder decides `goal_reached`: `goal.isEnd(feet) || goal.isEnd(feet.offset(0, 1, 0))` with `feet = bot.entity.position.floored()`. Do not add a stricter distance of your own: `GoalNear` accepts a range on purpose, and a second threshold turns real arrivals into failures. If the next step needs an exact spot, use a goal that says so (`GoalBlock`).
 
 ## After NoPath or a stall
 
