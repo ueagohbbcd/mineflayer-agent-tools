@@ -1,0 +1,1 @@
+**Getting around** ([mineflayer-navigation](references/mineflayer-navigation.md)): move with Pathfinder, setting `Movements` for what a path may do (digging, towers, parkour, drops). After `NoPath` or a stall, look before retrying the same goal. Before using the hand, wait until Pathfinder has really stopped. Keep a few waypoints for places you come back to.

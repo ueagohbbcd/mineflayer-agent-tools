@@ -28,7 +28,9 @@ To let an agent play Minecraft through Mineflayer, give it the skills in
 [`skills/`](skills/): [`mf-basics`](skills/mf-basics/SKILL.md) first (running
 the character and programs with `mf`, the log, the work loop, the examples),
 and the peer `mineflayer-*` skills for writing programs and setup, moving,
-looking, items and survival. It runs
+looking, items and survival. To give it one skill instead, use the bundle
+[`bundle/mineflayer-agent`](bundle/mineflayer-agent/SKILL.md), built from the
+same files (`npm run build:bundle`). It runs
 programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
 `mf run program.mjs` runs a program on the character (in the background of
 your own tool for long ones) and `mf log` shows what happened in the game.
