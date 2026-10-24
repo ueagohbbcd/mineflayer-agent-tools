@@ -70,7 +70,7 @@ async function observe(t, bot, inbox, overrides = {}) {
     bot,
     inbox: localInboxClient(inbox),
     cwd,
-    env: { ARENA_OBSERVER_CONFIG: await noScanConfig() },
+    env: { MF_OBSERVER_CONFIG: await noScanConfig() },
     intervalMs: 5,
     watch: fakeWatch,
     sample: fakeSample,
@@ -311,7 +311,7 @@ test("native observer reports bot disconnect and removes its listeners on close"
   const running = await runObserver({
     bot,
     inbox: localInboxClient(inbox),
-    env: { ARENA_OBSERVER_CONFIG: await noScanConfig() },
+    env: { MF_OBSERVER_CONFIG: await noScanConfig() },
     watch: fakeWatch,
     sample: fakeSample,
   });

@@ -133,7 +133,7 @@ export class InboxClient {
     taskId = process.env.MC_INBOX_TASK_ID,
     // Inside a character's process: which character, and which process of it.
     bot = process.env.MF_CHARACTER,
-    generation = process.env.ARENA_BOT_HOST_GENERATION,
+    generation = process.env.MF_HOST_GENERATION,
     timeoutMs = 5000,
   } = {}) {
     if (!socketPath) throw new Error("MC_INBOX_SOCKET is required");

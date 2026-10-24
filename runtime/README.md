@@ -24,10 +24,12 @@ npx mf run look.mjs
 ```
 
 Node 22 or newer. State lives in `./.mf` (or `MF_STATE_DIR`), so run `mf`
-from the directory where you started it: sockets, `supervisor.log`, and
+from the directory where you started it: sockets, `supervisor.log`,
 `tasks/<taskId>/` with `stdout.log`, `stderr.log` and `status.json` for each
 program (the newest 100 are kept across restarts; idle and snapshots leave
-none).
+none), and `inbox.jsonl`, one line per result that gave reports (`mf inbox`,
+`mf run --inbox`) with the reports it gave, so what the agent was told can be
+read afterwards (past 20 MB it moves to `inbox.1.jsonl`).
 
 ## Commands
 
@@ -234,7 +236,7 @@ synchronous loop, is killed and restarted, and its program is interrupted.
 | Variable                       | Default                  |                                                                           |
 | ------------------------------ | ------------------------ | ------------------------------------------------------------------------- |
 | `MF_USERNAME` / `MF_USERNAMES` | (required)               | Character name(s)                                                         |
-| `MF_HOST`, `MF_PORT`           | (required), 25565        | Server (`ARENA_MINECRAFT_HOST`/`_PORT` still work)                        |
+| `MF_HOST`, `MF_PORT`           | (required), 25565        | Server                                                                    |
 | `MC_VERSION`                   | 1.21.1                   | Game version                                                              |
 | `MF_AUTH`, `MF_PROFILES_DIR`   | offline                  | `microsoft` logs in with an account; profiles are cached in the directory |
 | `MF_STATE_DIR`                 | `./.mf`                  | State, sockets and logs                                                   |
@@ -242,6 +244,16 @@ synchronous loop, is killed and restarted, and its program is interrupted.
 | `MF_DEFAULT_SCRIPTS`           | `observer,chat,watchdog` | Which default scripts run                                                 |
 | `MF_REPORT_BYTES`              | 16000                    | How much report text one result shows                                     |
 | `MF_HOST_UNRESPONSIVE_SECONDS` | 20                       | Restart a character's process after this long without a heartbeat         |
+| `MF_INBOX_LOG_BYTES`           | 20000000                 | Size at which `inbox.jsonl` moves to `inbox.1.jsonl`                      |
+| `MF_OBSERVER_CONFIG`           | `./observer.json`        | The default observer's settings file                                      |
+| `MF_CHAT_WAKE`                 | none                     | `mention` or `all`: chat lines that make the chat report urgent           |
+| `MF_SESSION_URL`               | (none)                   | Session endpoint `bot.getSessionState()` reads (else an open session)    |
+| `MF_WORLD_MEMORY_MODE`         | off                      | `session` or `persistent` attaches world memory as `bot.worldMemory`      |
+| `MF_WORLD_MEMORY_DIR`          | (none)                   | Where persistent world memory lives (implies `persistent`)                |
+
+These settings used to be named `ARENA_*` (`ARENA_MINECRAFT_HOST`/`_PORT` for
+the server, `ARENA_OBSERVER_CONFIG` and so on); the old names are still read.
+`bot.arenaMemory` is the older name of `bot.worldMemory`.
 
 A character process that keeps exiting is restarted after 2 s, then later each
 time, up to a minute.

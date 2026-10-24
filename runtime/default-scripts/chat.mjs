@@ -2,6 +2,7 @@
 // Forwards native Mineflayer chat events through the normal InboxClient.
 import { once } from "node:events";
 import { InboxClient, inboxSlot } from "../inbox/index.mjs";
+import { setting } from "../env.mjs";
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -32,7 +33,7 @@ export function startChatForwarder({
   bot,
   inbox,
   signal,
-  wake = process.env.MF_CHAT_WAKE || process.env.ARENA_CHAT_WAKE || "none",
+  wake = setting("CHAT_WAKE") || "none",
 }) {
   if (!["none", "mention", "all"].includes(wake))
     throw new Error("MF_CHAT_WAKE must be none, mention or all");
