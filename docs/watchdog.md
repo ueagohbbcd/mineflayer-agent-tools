@@ -25,6 +25,11 @@ bot's `position` where it applies.
 | `repeat`  | The same thing `repeatCount` times within `repeatWindowMs`: the pathfinder reported `noPath`, the same non-dynamic goal was set again, or the same error was passed to `dog.failure()`. Reported once until the count drops below the limit. | `key`, `count`, `seconds`, `goal` or `error`           |
 | `blocked` | Urgent. The program did not return to its event loop for `blockedMs`, so Mineflayer could not act. See below.                                                                                                                         | `seconds`                                             |
 
+Under `mf`, the runtime also writes `stuck` and `repeat` findings as urgent
+`program-watchdog` log entries, so a waiting `mf run` returns early while
+the program continues. The library itself only calls `report`; it does not
+write logs or wake a model.
+
 ## Options
 
 The default long-running watchdog (`runtime/default-scripts/watchdog.mjs`)

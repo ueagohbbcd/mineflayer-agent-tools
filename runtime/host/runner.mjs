@@ -16,7 +16,9 @@
  *
  * A controlling run gets the watchdog (../../watchdog.mjs) by default: its
  * findings (stuck, repeating the same failure) are printed into the run's own
- * output as `[watchdog] ...` lines, and the run gets it as `watchdog` to call
+ * output as `[watchdog] ...` lines and posted as urgent program-watchdog log
+ * entries, so a waiting `mf run` returns while the program keeps running.
+ * The run gets it as `watchdog` to call
  * `failure(error)`, `pause()` or `resume()`. `export const watchdog = false`
  * turns it off; an object (`{ stuckMs: 30000 }`) sets its options.
  *
@@ -39,6 +41,7 @@ import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { format } from "node:util";
 import { watchdog as startWatchdog } from "../../watchdog.mjs";
+import { LogClient } from "../log/client.mjs";
 
 const LISTEN = [
   "on",
@@ -228,6 +231,7 @@ export async function startRunner({
     active.add(state);
     let result;
     let dog;
+    const watchdogPosts = new Set();
     try {
       const file = isAbsolute(request.file)
         ? request.file
@@ -239,13 +243,42 @@ export async function startRunner({
         if (typeof main !== "function")
           throw new Error(`${request.file} has no default export function`);
         const view = runBot(bot, listeners);
-        if (state.control && module.watchdog !== false)
+        if (state.control && module.watchdog !== false) {
+          // Capture the run's identity now, before participant code can change
+          // its environment. The library remains a passive event reporter.
+          const logOptions = {
+            source: "program-watchdog",
+            socketPath: process.env.MF_LOG_SOCKET,
+            dir: process.env.MF_LOG_DIR,
+            task: process.env.MF_TASK_ID,
+            bot: process.env.MF_CHARACTER,
+          };
+          let log;
           dog = startWatchdog(view, {
             // A blocked loop is the supervisor's: it restarts the process.
             blockedMs: 0,
             ...(module.watchdog && typeof module.watchdog === "object" ? module.watchdog : {}),
-            report: (event) => state.write(`[watchdog] ${event.message}`),
+            report(event) {
+              state.write(`[watchdog] ${event.message}`);
+              if (event.type !== "stuck" && event.type !== "repeat") return;
+              // LogClient's HTTP timeout must outlive this module's timers.
+              // A failed post stays visible without failing the program.
+              const post = runs.exit(() =>
+                Promise.resolve()
+                  .then(() => {
+                    log ??= new LogClient(logOptions);
+                    const { urgent: _, ...data } = event;
+                    return log.post(data, { type: event.type, urgent: true });
+                  })
+                  .catch((error) =>
+                    state.write(`[watchdog] Log delivery failed: ${error.message}`),
+                  )
+                  .finally(() => watchdogPosts.delete(post)),
+              );
+              watchdogPosts.add(post);
+            },
           });
+        }
         return main(view, {
           signal: controller.signal,
           args: request.args ?? [],
@@ -271,6 +304,7 @@ export async function startRunner({
       for (const [event, fn] of listeners) bot.removeListener(event, fn);
       for (const [clear, handle] of state.timers) globalThis[clear](handle);
       if (state.control) stopMoving(bot);
+      await Promise.all(watchdogPosts);
     }
     send(result);
     client.end();

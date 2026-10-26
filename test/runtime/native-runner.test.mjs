@@ -20,6 +20,8 @@ import {
   session as readSession,
 } from "../../runtime/host/rpc.mjs";
 import { hostEnv, startBotHosts } from "../../runtime/host/launcher.mjs";
+import { LogStore, createLogServer } from "../../runtime/log/index.mjs";
+import { socketPath as localSocket } from "../../runtime/socket-path.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -87,11 +89,121 @@ async function setup(t) {
       stdout: out,
       stderr: err,
       signals: options.signals ?? new EventEmitter(),
+      env: options.env ?? process.env,
+      control: options.control,
     });
     return { code, stdout, stderr };
   };
   return { bot, runner, run, dir, socketPath };
 }
+
+async function watchdogLog(t, dir) {
+  const socketPath = localSocket(dir, "watchdog-log.sock");
+  const store = new LogStore({ dir: join(dir, "log") });
+  const entries = [];
+  store.on("entry", (entry) => entries.push(entry));
+  const server = await createLogServer({ store, socketPath });
+  t.after(() => server.close());
+  return { entries, env: { MF_LOG_SOCKET: socketPath, MF_TASK_ID: "original-task" } };
+}
+
+test("controlling watchdog posts urgent findings with captured identity, deduplicates and resumes after recovery", async (t) => {
+  const { run, dir, runner, bot } = await setup(t);
+  const { entries, env } = await watchdogLog(t, dir);
+  const saved = process.env.MF_CHARACTER;
+  process.env.MF_CHARACTER = "original-character";
+  let result;
+  try {
+    result = await run(
+      `export const watchdog = { repeatCount: 2, repeatWindowMs: 100, now: () => globalThis.watchdogTestClock };
+      export default (bot, { watchdog }) => {
+        globalThis.watchdogTestClock = 0;
+        process.env.MF_TASK_ID = 'changed-task';
+        process.env.MF_CHARACTER = 'changed-character';
+        watchdog.failure('no route'); watchdog.failure('no route'); watchdog.failure('no route');
+        globalThis.watchdogTestClock = 101;
+        watchdog.failure('no route'); watchdog.failure('no route');
+        watchdog.pause();
+        watchdog.failure('paused'); watchdog.failure('paused');
+        watchdog.resume();
+        watchdog.failure('paused'); watchdog.failure('paused');
+        return 'program survived';
+      }`,
+      [], { env },
+    );
+  } finally {
+    delete globalThis.watchdogTestClock;
+    if (saved === undefined) delete process.env.MF_CHARACTER;
+    else process.env.MF_CHARACTER = saved;
+  }
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /program survived/);
+  assert.equal((result.stdout.match(/\[watchdog\]/g) ?? []).length, 3);
+  assert.equal(entries.length, 3, "the completed run flushed its pending posts");
+  for (const entry of entries) {
+    assert.equal(entry.source, "program-watchdog");
+    assert.equal(entry.type, "repeat");
+    assert.equal(entry.urgent, true);
+    assert.equal(entry.data.urgent, undefined, "urgency belongs to the log entry");
+    assert.equal(entry.task, "original-task");
+    assert.equal(entry.bot, "original-character");
+  }
+  assert.deepEqual(entries.map((entry) => entry.data.error), ['no route', 'no route', 'paused']);
+  assert.equal(runner.active(), 0);
+  assert.equal(bot.listenerCount('path_update'), 0);
+});
+
+test("stuck watchdog posts once until movement makes progress again", async (t) => {
+  const { run, dir } = await setup(t);
+  const { entries, env } = await watchdogLog(t, dir);
+  const result = await run(
+    `export const watchdog = { stuckMs: 20, checkMs: 5 };
+    export default async (bot) => {
+      bot.entity = { position: { x: 0, y: 64, z: 0 } };
+      bot.setControlState('forward', true);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      bot.entity.position.x = 2;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }`, [], { env },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(entries.length, 2);
+  assert.ok(entries.every((entry) => entry.type === 'stuck' && entry.urgent));
+  assert.equal((result.stdout.match(/\[watchdog\]/g) ?? []).length, 2);
+});
+
+test("read-only and explicitly disabled runs do not install or post a watchdog", async (t) => {
+  const { run, dir } = await setup(t);
+  const { entries, env } = await watchdogLog(t, dir);
+  for (const [declaration, control] of [["export const control = false;", true], ["export const watchdog = false;", true], ["", false]]) {
+    const result = await run(
+      `${declaration}
+      export default (_bot, { watchdog }) => {
+        if (watchdog !== undefined) throw new Error('unexpected watchdog');
+        return 'disabled';
+      }`, [], { env, control },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /\[watchdog\]/);
+  }
+  assert.deepEqual(entries, []);
+});
+
+test("a failed watchdog log post is visible and does not fail or outlive the program", async (t) => {
+  const { run, dir, runner } = await setup(t);
+  const result = await run(
+    `export const watchdog = { repeatCount: 2 };
+    export default (_bot, { watchdog }) => {
+      watchdog.failure('no route'); watchdog.failure('no route');
+      return 'normal completion';
+    }`, [], { env: { MF_LOG_SOCKET: localSocket(dir, "missing.sock") } },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /The same error keeps happening/);
+  assert.match(result.stdout, /\[watchdog\] Log delivery failed:/);
+  assert.match(result.stdout, /normal completion/);
+  assert.equal(runner.active(), 0);
+});
 
 test("a module runs on the native bot; its listeners and timers go when it ends", async (t) => {
   const { bot, runner, run } = await setup(t);

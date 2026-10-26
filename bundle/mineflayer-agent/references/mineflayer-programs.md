@@ -65,7 +65,7 @@ Under `mf`, the second argument carries the `signal`, which aborts on `mf cancel
 
 ## Watchdog
 
-Under `mf` every controlling program already has one (its findings are `[watchdog]` lines in the program's output; see [SKILL.md](../SKILL.md)). Elsewhere, or to end a program on a finding (with `export const watchdog = false` under `mf`), wrap a controller with the watchdog to hear about a stuck bot, repeated failures or a blocked event loop:
+Under `mf` every controlling program already has one (its findings appear in the program's output and as urgent `program-watchdog` log entries that return a waiting `mf run` early; see [SKILL.md](../SKILL.md)). Elsewhere, or to end a program on a finding (with `export const watchdog = false` under `mf`), wrap a controller with the watchdog to hear about a stuck bot, repeated failures or a blocked event loop:
 
 ```js
 import { watchdog } from "mineflayer-world-memory/watchdog.mjs";
@@ -103,7 +103,7 @@ Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a 
 | Remember chunks after they unload       | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`.                                                                                                                                                         |
 | A picture of the terrain or a structure | `mineflayer-world-memory/live.mjs`: `observationViewBounds`, `surfaceSnapshotFromBot` + `renderTexturedSurface`, `snapshotFromBot` + `renderOblique`, `saveRender` (see `docs/live-visual.md`). Blank means not received, not air.                                                              |
 | The logs of one tree before chopping    | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`.                                                                                                                                                                                                             |
-| Notice a stuck or looping program       | Under `mf` every controlling program has one: its findings are `[watchdog]` lines in the program's output (`watchdog.failure(error)` counts an error you caught). Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
+| Notice a stuck or looping program       | Under `mf` every controlling program has one: its findings appear in the output and urgent `program-watchdog` log entries (`watchdog.failure(error)` counts an error you caught). Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
 | One full sample of your state           | `mf snapshot`                                                                                                                                                                                                                                                                                   |
 
 ## Setting up `mf`, or connecting without it

@@ -108,7 +108,7 @@ with the supervisor stopped too.
 
 The runtime's own sources: `runtime` (stops, idle failures), `tasks` (a
 program that ended while nobody waited for it, with the end of its output),
-`chat`, `idle`. Each background module adds its own.
+`chat`, `idle`, and `program-watchdog` (controlling programs stuck or repeating failures). Each background module adds its own.
 
 Programs write with `LogClient`
 (`${process.env.MF_TOOLKIT_ROOT}/runtime/log/index.mjs`):
@@ -176,7 +176,11 @@ Every controlling run gets the [watchdog](../docs/watchdog.md): when the
 character tries to move but does not (15 s), or the same failure repeats
 (pathfinder `noPath`, the same goal again, the same error passed to
 `watchdog.failure()`), a `[watchdog] …` line appears in the program's own
-output. `export const watchdog = false` turns it off; an object sets its
+output and an urgent `program-watchdog` entry returns a waiting `mf run`
+early as `running`. The program continues; the harness can wake its model
+when that shell command finishes. Each persistent finding is reported once
+until progress or the repeat count dropping below its threshold re-arms
+the detector. `export const watchdog = false` turns it off; an object sets its
 options (`export const watchdog = { stuckMs: 30000 }`). A blocked event loop
 is the supervisor's (below).
 
