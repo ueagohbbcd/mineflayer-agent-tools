@@ -17,6 +17,10 @@ const controls = [
   "sneak",
 ];
 const finite = (value) => (Number.isFinite(value) ? value : null);
+const radarDefaults = Object.freeze({
+  entityLimit: 12,
+  entityAttentionRadius: 16,
+});
 
 // Mineflayer sets bot.oxygenLevel from the air supply of any entity whose
 // metadata arrives (a dolphin nearby makes it tick down on land), so read the
@@ -27,6 +31,15 @@ function oxygenOf(bot) {
   const air = index >= 0 ? bot?.entity?.metadata?.[index] : undefined;
   if (Number.isFinite(air)) return Math.round(air / 15);
   return bot?.entity ? 20 : null;
+}
+
+/** The self fields needed by background danger reporting. */
+function sampleVitals(bot) {
+  return {
+    position: vector(bot?.entity?.position),
+    food: finite(bot?.food),
+    oxygen: oxygenOf(bot),
+  };
 }
 const boolean = (value) => (typeof value === "boolean" ? value : null);
 const vector = (value) =>
@@ -531,6 +544,90 @@ function entitiesSummary(bot, options, origin) {
   };
 }
 
+function validateRadarOptions(options) {
+  if (!Number.isInteger(options.entityLimit) || options.entityLimit < 0)
+    throw new RangeError("entityLimit must be a nonnegative integer");
+  if (!(Number.isFinite(options.entityAttentionRadius) && options.entityAttentionRadius > 0))
+    throw new RangeError("entityAttentionRadius must be positive");
+  if (
+    options.entityRadius != null &&
+    !(Number.isFinite(options.entityRadius) && options.entityRadius > 0)
+  )
+    throw new RangeError("entityRadius must be positive");
+}
+
+/** Build the radar view, including the state and risk details used by snapshots. */
+function sampleRadarParts(bot, options, origin) {
+  const observedEntities = entitiesSummary(bot, options, origin);
+  const entityMode = options.radar?.entities ?? "chunks";
+  const radar = entityRadar(bot, { ...options.radar, entities: "list" });
+  const playersById = new Map(
+    observedEntities.players.map((player) => [player.id, player]),
+  );
+  for (const entry of radar.players) {
+    const player = playersById.get(entry.id);
+    if (player)
+      Object.assign(entry, {
+        team: player.team,
+        relation: player.relation,
+        state: player.state,
+      });
+  }
+  for (const entry of [...radar.named, ...radar.entities]) {
+    const source = bot?.entities?.[entry.id];
+    if (source)
+      entry.state = entityState(source, bot.registry, options.fullEntities);
+  }
+  if (entityMode === "chunks") {
+    // The chunk summary drops positions and decoded state; risk signs on a
+    // visible entity (lit TNT, a swelling creeper, a moving projectile,
+    // something targeting you) stay listed one by one.
+    const visible = new Set(
+      [...radar.named, ...radar.entities].map((entry) => entry.id),
+    );
+    radar.alerts = observedEntities.entities.entries
+      .filter(
+        (entity) => entity.attention?.priority === 2 && visible.has(entity.id),
+      )
+      .map((entity) => ({
+        id: entity.id,
+        name: entity.name,
+        position: Object.fromEntries(
+          axes.map((axis) => [
+            axis,
+            Math.round(entity.position[axis] * 10) / 10,
+          ]),
+        ),
+        distance: Math.round(entity.distance * 10) / 10,
+        reasons: entity.attention.reasons,
+      }));
+    radar.entityChunks = chunkEntities(radar.entities);
+    delete radar.entities;
+  }
+  return { observedEntities, radar };
+}
+
+/** Sample radar without building inventory, window, or local-block sections. */
+export function sampleRadar(bot, options = {}) {
+  options = { ...radarDefaults, ...options };
+  validateRadarOptions(options);
+  return sampleRadarParts(
+    bot,
+    options,
+    vector(bot?.entity?.position),
+  ).radar;
+}
+
+/** Small state slice used by the background danger reporter. */
+export function minimalDangerSample(bot, options = {}) {
+  const self = sampleVitals(bot);
+  const radar = sampleRadar(bot, options);
+  return {
+    self,
+    radar: radar.alerts === undefined ? {} : { alerts: radar.alerts },
+  };
+}
+
 function classify(block) {
   if (!block || block.known === false) return "unknown";
   if (air.has(blockName(block))) return "air";
@@ -706,17 +803,17 @@ function localSummary(bot, options, origin) {
 export function sampleObservation(bot, options = {}) {
   options = {
     staleAfterMs: 5000,
-    entityLimit: 12,
-    entityAttentionRadius: 16,
+    ...radarDefaults,
     localRadius: 2,
     blockLimit: 16,
     signLimit: 16,
     maxSampleCells: 250_000,
     ...options,
   };
-  for (const name of ["entityLimit", "localRadius", "blockLimit", "signLimit"])
+  for (const name of ["localRadius", "blockLimit", "signLimit"])
     if (!Number.isInteger(options[name]) || options[name] < 0)
       throw new RangeError(`${name} must be a nonnegative integer`);
+  validateRadarOptions(options);
   const sampleCells = (2 * options.localRadius + 1) ** 3;
   if (
     !(
@@ -736,16 +833,6 @@ export function sampleObservation(bot, options = {}) {
     );
   if (!(Number.isFinite(options.staleAfterMs) && options.staleAfterMs > 0))
     throw new RangeError("staleAfterMs must be positive");
-  if (!(
-    Number.isFinite(options.entityAttentionRadius) &&
-    options.entityAttentionRadius > 0
-  ))
-    throw new RangeError("entityAttentionRadius must be positive");
-  if (
-    options.entityRadius != null &&
-    !(Number.isFinite(options.entityRadius) && options.entityRadius > 0)
-  )
-    throw new RangeError("entityRadius must be positive");
   const observedAt = clock(options.now);
   // A native Mineflayer bot is live: its state is sampled as it is read.
   const sampledAt =
@@ -780,7 +867,8 @@ export function sampleObservation(bot, options = {}) {
                 ? "stale"
                 : "fresh");
   const entity = bot?.entity,
-    position = vector(entity?.position);
+    vitals = sampleVitals(bot),
+    position = vitals.position;
   const below = position
     ? {
         x: Math.floor(position.x),
@@ -788,52 +876,11 @@ export function sampleObservation(bot, options = {}) {
         z: Math.floor(position.z),
       }
     : null;
-  const observedEntities = entitiesSummary(bot, options, position);
-  const entityMode = options.radar?.entities ?? "chunks";
-  const radar = entityRadar(bot, { ...options.radar, entities: "list" });
-  const playersById = new Map(
-    observedEntities.players.map((player) => [player.id, player]),
+  const { observedEntities, radar } = sampleRadarParts(
+    bot,
+    options,
+    position,
   );
-  for (const entry of radar.players) {
-    const player = playersById.get(entry.id);
-    if (player)
-      Object.assign(entry, {
-        team: player.team,
-        relation: player.relation,
-        state: player.state,
-      });
-  }
-  for (const entry of [...radar.named, ...radar.entities]) {
-    const source = bot?.entities?.[entry.id];
-    if (source)
-      entry.state = entityState(source, bot.registry, options.fullEntities);
-  }
-  if (entityMode === "chunks") {
-    // The chunk summary drops positions and decoded state; risk signs on a
-    // visible entity (lit TNT, a swelling creeper, a moving projectile,
-    // something targeting you) stay listed one by one.
-    const visible = new Set(
-      [...radar.named, ...radar.entities].map((entry) => entry.id),
-    );
-    radar.alerts = observedEntities.entities.entries
-      .filter(
-        (entity) => entity.attention?.priority === 2 && visible.has(entity.id),
-      )
-      .map((entity) => ({
-        id: entity.id,
-        name: entity.name,
-        position: Object.fromEntries(
-          axes.map((axis) => [
-            axis,
-            Math.round(entity.position[axis] * 10) / 10,
-          ]),
-        ),
-        distance: Math.round(entity.distance * 10) / 10,
-        reasons: entity.attention.reasons,
-      }));
-    radar.entityChunks = chunkEntities(radar.entities);
-    delete radar.entities;
-  }
   return {
     type: "observation",
     observedAt,
@@ -859,9 +906,9 @@ export function sampleObservation(bot, options = {}) {
       pitch: finite(entity?.pitch),
       velocity: vector(entity?.velocity),
       health: finite(bot?.health),
-      food: finite(bot?.food),
+      food: vitals.food,
       isSleeping: boolean(bot?.isSleeping),
-      oxygen: oxygenOf(bot),
+      oxygen: vitals.oxygen,
       effects: plain(entity?.effects),
       dimension: bot?.game?.dimension ?? null,
       controlFlags: bot?.controlState

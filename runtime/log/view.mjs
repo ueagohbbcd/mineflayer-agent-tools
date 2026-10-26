@@ -171,13 +171,33 @@ export async function readLog({
   budget = 8000,
   now = Date.now,
 } = {}) {
+  const selection = selectEntries({ dir, sources, bot, since, all });
+  const text = await renderLog({
+    dir,
+    ...selection,
+    raw,
+    budget,
+    now,
+  });
+  return {
+    text,
+    commit() {
+      // One character's view leaves the others' entries unread.
+      if (selection.fromCursor && !peek && !bot)
+        commitCursor(dir, selection.advances);
+    },
+  };
+}
+
+/** Select entries and the per-source cursor advances represented by this view. */
+function selectEntries({ dir, sources, bot, since, all }) {
   const cursor = readCursor(dir);
   const known = listSources(dir);
   const wanted = sources?.length ? sources : known;
   const unknown = wanted.filter((source) => !known.includes(source));
   const fromCursor = since === undefined && !all;
   const sections = [];
-  const moved = { ...cursor };
+  const advances = new Map();
   for (const source of wanted.filter((name) => known.includes(name))) {
     const entries = readEntries(dir, source, { older: !fromCursor });
     const after = cursor[source] ?? 0;
@@ -186,9 +206,23 @@ export async function readLog({
         (!bot || !entry.bot || entry.bot === bot) &&
         (fromCursor ? entry.seq > after : since === undefined || entry.at >= since),
     );
-    if (fromCursor && entries.length) moved[source] = Math.max(after, entries.at(-1).seq);
+    if (fromCursor && entries.length)
+      advances.set(source, Math.max(after, entries.at(-1).seq));
     if (shown.length) sections.push({ source, entries: shown });
   }
+  return { fromCursor, sections, unknown, known, advances };
+}
+
+/** Merge only this view's advances; this shared cursor does not serialize CLI processes. */
+function commitCursor(dir, advances) {
+  const cursor = { ...readCursor(dir) };
+  for (const [source, seq] of advances)
+    cursor[source] = Math.max(cursor[source] ?? 0, seq);
+  writeCursor(dir, cursor);
+}
+
+/** Render selected entries without changing the read position. */
+async function renderLog({ dir, sections, unknown, known, fromCursor, raw, budget, now }) {
   const share = sections.length ? Math.max(1000, Math.floor(budget / sections.length)) : budget;
   const out = [];
   for (const { source, entries } of sections) {
@@ -211,11 +245,5 @@ export async function readLog({
   if (unknown.length) out.push(`(no log yet for: ${unknown.join(", ")}; sources: ${known.join(", ") || "none"})`);
   if (!sections.length)
     out.unshift(fromCursor ? "nothing new since you last read the log" : "nothing in the log for that");
-  return {
-    text: `${out.join("\n")}\n`,
-    commit() {
-      // One character's view leaves the others' entries unread.
-      if (fromCursor && !peek && !bot) writeCursor(dir, moved);
-    },
-  };
+  return `${out.join("\n")}\n`;
 }

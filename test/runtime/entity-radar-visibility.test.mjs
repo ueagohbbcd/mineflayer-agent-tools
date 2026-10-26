@@ -7,6 +7,11 @@ import {
   centerVisibility,
   groupDrops,
 } from "../../runtime/observation/entity-radar.mjs";
+import {
+  minimalDangerSample,
+  sampleObservation,
+  sampleRadar,
+} from "../../runtime/observation/snapshot.mjs";
 const registry = registryLoader("1.21.1");
 const air = { name: "air", transparent: true, shapes: [] };
 const solid = {
@@ -166,8 +171,6 @@ test("no current player position produces unavailable radar", () =>
   assert.equal(entityRadar({}).known, false));
 
 test("default observation radar keeps trusted team relation", async () => {
-  const { sampleObservation } =
-    await import("../../runtime/observation/index.mjs");
   const b = bot({
     2: {
       id: 2,
@@ -205,8 +208,6 @@ test("radar summarizes entities per chunk column by default", () => {
 });
 
 test("chunk radar in a sample keeps risk entities listed one by one", async () => {
-  const { sampleObservation } =
-    await import("../../runtime/observation/index.mjs");
   const b = bot({
     2: { id: 2, name: "tnt", position: { x: 3.333, y: 0, z: 0.5 } },
     3: { id: 3, name: "cod", position: { x: 4, y: 0, z: 0.5 } },
@@ -229,6 +230,46 @@ test("chunk radar in a sample keeps risk entities listed one by one", async () =
   });
   assert.equal(list.radar.entities.length, 2);
   assert.equal(list.radar.alerts, undefined);
+});
+
+test("targeted radar samples preserve snapshot details without inventory or local scans", () => {
+  const entities = {
+    2: { id: 2, name: "tnt", position: { x: 3, y: 0, z: 0.5 } },
+    3: {
+      id: 3,
+      name: "player",
+      username: "ally",
+      metadata: { 0: 0 },
+      position: { x: 5, y: 0, z: 0 },
+    },
+  };
+  const teams = { selfTeam: "blue", byUsername: { ally: "blue" } };
+  const complete = bot(entities, () => air);
+  complete.username = "self";
+  complete.food = 5;
+  const expected = sampleObservation(complete, { teams, localRadius: 0 });
+  const radar = sampleRadar(complete, { teams });
+  assert.deepEqual(radar, expected.radar);
+
+  let blockReads = 0;
+  const targeted = bot(entities, () => {
+    blockReads++;
+    return air;
+  });
+  targeted.username = "self";
+  targeted.food = 5;
+  Object.defineProperties(targeted, {
+    inventory: { get: () => assert.fail("targeted sample read inventory") },
+    currentWindow: { get: () => assert.fail("targeted sample read window") },
+  });
+  const danger = minimalDangerSample(targeted, { teams });
+  assert.deepEqual(danger.self, {
+    position: { x: 0.5, y: 0, z: 0.5 },
+    food: 5,
+    oxygen: 20,
+  });
+  assert.deepEqual(danger.radar.alerts, expected.radar.alerts);
+  assert.ok(blockReads > 0 && blockReads < 125, `unexpected block reads: ${blockReads}`);
 });
 
 test("entities whose name tag shows are listed through walls as named", () => {

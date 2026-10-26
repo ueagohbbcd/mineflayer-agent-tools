@@ -85,6 +85,38 @@ test("mf log shows what is new per source, once, and the read position survives"
   assert.match(all.text, /chat: 3 shown/);
 });
 
+test("interleaved log commits merge only their sources and never rewind", async (t) => {
+  const dir = await tempDir(t);
+  const store = new LogStore({ dir, now: () => at(12, 0, 0) });
+  store.append({ source: "chat", data: "one" });
+  store.append({ source: "runtime", data: "two" });
+
+  const chat = await readLog({ dir, sources: ["chat"] });
+  assert.deepEqual(Object.keys(chat).sort(), ["commit", "text"]);
+  const runtime = await readLog({ dir, sources: ["runtime"] });
+  runtime.commit();
+  chat.commit();
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "cursor.json"), "utf8")), {
+    chat: 1,
+    runtime: 2,
+  });
+
+  store.append({ source: "chat", data: "three" });
+  const olderChatRead = await readLog({ dir, sources: ["chat"] });
+  store.append({ source: "chat", data: "four" });
+  const newerChatRead = await readLog({ dir, sources: ["chat"] });
+  newerChatRead.commit();
+  olderChatRead.commit();
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "cursor.json"), "utf8")), {
+    chat: 4,
+    runtime: 2,
+  });
+  assert.equal(
+    (await readLog({ dir, sources: ["chat"] })).text,
+    "nothing new since you last read the log\n",
+  );
+});
+
 test("the generic view keeps the newest per key and folds repeats", () => {
   const lines = genericLines([
     { seq: 1, at: at(1, 0, 0), source: "s", key: "state", data: { hp: 20 } },

@@ -13,9 +13,10 @@
 //
 // `mf log --source radar` shows what came and went since you last read it,
 // and the latest positions and counts.
-import { sampleObservation } from "../observation/snapshot.mjs";
+import { sampleRadar } from "../observation/snapshot.mjs";
 import { observationOptionsFromSession } from "../observation/session-options.mjs";
 import { LogClient } from "../log/client.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 
 const round = (value, step) => (step > 0 ? Math.round(value / step) * step : Math.round(value));
 const at = (p, step) => p && [round(p.x, step), round(p.y, step), round(p.z, step)];
@@ -49,15 +50,18 @@ export function radarState(radar, { step = 8 } = {}) {
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Watch one bot; returns { close(), flush() }. */
-export function startRadar({ bot, log, sampleMs = 2000, step = 8, options = {}, sample = sampleObservation }) {
-  const writes = new Set();
-  const write = (data, opts) => {
-    const done = Promise.resolve(log.post(data, opts)).catch((error) =>
-      console.error(`radar: log failed: ${error.message}`),
-    );
-    writes.add(done);
-    done.finally(() => writes.delete(done));
-  };
+export function startRadar({
+  bot,
+  log,
+  sampleMs = 2000,
+  step = 8,
+  options = {},
+  sample = (bot, options) => ({ radar: sampleRadar(bot, options) }),
+}) {
+  const writes = createPendingWrites((error) =>
+    console.error(`radar: log failed: ${error.message}`),
+  );
+  const write = (data, opts) => writes.track(() => log.post(data, opts));
   let last = { players: {}, named: {}, mobs: {}, drops: [] };
   const timer = setInterval(() => {
     let state;
@@ -79,7 +83,7 @@ export function startRadar({ bot, log, sampleMs = 2000, step = 8, options = {}, 
     last = state;
   }, sampleMs);
   return {
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     close: () => clearInterval(timer),
   };
 }
