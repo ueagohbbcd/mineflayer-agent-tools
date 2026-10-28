@@ -232,6 +232,34 @@ test("chunk radar in a sample keeps risk entities listed one by one", async () =
   assert.equal(list.radar.alerts, undefined);
 });
 
+test("visible risk alerts survive entity display truncation", () => {
+  const hidden = Object.fromEntries(
+    Array.from({ length: 12 }, (_, index) => {
+      const id = index + 2;
+      return [
+        id,
+        { id, name: "tnt", position: { x: 5, y: 0, z: 0.5 } },
+      ];
+    }),
+  );
+  const b = bot(
+    {
+      ...hidden,
+      99: { id: 99, name: "tnt", position: { x: 0.5, y: 0, z: 5 } },
+    },
+    (position) =>
+      position.x === 2 && position.y === 1 && position.z === 0 ? solid : air,
+  );
+  const sample = sampleObservation(b, { local: false });
+
+  assert.equal(sample.entities.entries.length, 12);
+  assert.equal(sample.entities.entries.some((entity) => entity.id === 99), false);
+  assert.deepEqual(
+    sample.radar.alerts.map(({ id }) => id),
+    [99],
+  );
+});
+
 test("targeted radar samples preserve snapshot details without inventory or local scans", () => {
   const entities = {
     2: { id: 2, name: "tnt", position: { x: 3, y: 0, z: 0.5 } },

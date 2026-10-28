@@ -524,23 +524,30 @@ function entitiesSummary(bot, options, origin) {
   }
   const known = bot?.entities != null;
   return {
-    playersKnown: known,
-    players,
-    entities: {
-      known,
-      total: known ? others.length : null,
-      shown: known ? entries.length : null,
-      omitted: known ? others.length - entries.length : null,
-      outsideRadius: known ? others.length - filtered.length : null,
-      byName: known ? byName : null,
-      entries,
-      selection: {
-        order: "nearby-observed-risk-then-distance",
-        attentionRadius: options.entityAttentionRadius,
+    observation: {
+      playersKnown: known,
+      players,
+      entities: {
+        known,
+        total: known ? others.length : null,
+        shown: known ? entries.length : null,
+        omitted: known ? others.length - entries.length : null,
+        outsideRadius: known ? others.length - filtered.length : null,
+        byName: known ? byName : null,
+        entries,
+        selection: {
+          order: "nearby-observed-risk-then-distance",
+          attentionRadius: options.entityAttentionRadius,
+        },
+        coverage:
+          "Observed entity mirror only. All observed players are separate and never distance-clipped. Attention is a display heuristic, not an attack or impact prediction. Disappearance does not establish death; visibility and hostility are not inferred.",
       },
-      coverage:
-        "Observed entity mirror only. All observed players are separate and never distance-clipped. Attention is a display heuristic, not an attack or impact prediction. Disappearance does not establish death; visibility and hostility are not inferred.",
     },
+    // Keep display truncation from hiding risk candidates that the radar can
+    // actually see. The entity list itself remains bounded for snapshots.
+    alertCandidates: filtered.filter(
+      (entity) => entity.attention?.priority === 2,
+    ),
   };
 }
 
@@ -558,7 +565,11 @@ function validateRadarOptions(options) {
 
 /** Build the radar view, including the state and risk details used by snapshots. */
 function sampleRadarParts(bot, options, origin) {
-  const observedEntities = entitiesSummary(bot, options, origin);
+  const { observation: observedEntities, alertCandidates } = entitiesSummary(
+    bot,
+    options,
+    origin,
+  );
   const entityMode = options.radar?.entities ?? "chunks";
   const radar = entityRadar(bot, { ...options.radar, entities: "list" });
   const playersById = new Map(
@@ -585,10 +596,8 @@ function sampleRadarParts(bot, options, origin) {
     const visible = new Set(
       [...radar.named, ...radar.entities].map((entry) => entry.id),
     );
-    radar.alerts = observedEntities.entities.entries
-      .filter(
-        (entity) => entity.attention?.priority === 2 && visible.has(entity.id),
-      )
+    radar.alerts = alertCandidates
+      .filter((entity) => visible.has(entity.id))
       .map((entity) => ({
         id: entity.id,
         name: entity.name,

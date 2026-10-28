@@ -38,11 +38,37 @@ export function radarState(radar, { step = 8 } = {}) {
     (radar?.named ?? []).map((e) => [e.customName ?? e.name, { name: e.name, at: at(e.position, step) }]),
   );
   const mobs = {};
-  for (const chunk of radar?.entityChunks ?? [])
-    for (const [name, count] of Object.entries(chunk.counts ?? {})) {
-      const near = round(chunk.nearest ?? 0, step);
-      mobs[name] = { count: (mobs[name]?.count ?? 0) + count, nearest: Math.min(mobs[name]?.nearest ?? Infinity, near) };
+  if (Array.isArray(radar?.entities)) {
+    for (const entity of radar.entities) {
+      const name = entity.name ?? "unknown";
+      const mob = (mobs[name] ??= { count: 0 });
+      mob.count++;
+      if (Number.isFinite(entity.distance)) {
+        const near = round(entity.distance, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
     }
+  } else {
+    // Older callers can still pass chunk summaries. A chunk's `nearest` is
+    // only attributable to a species when that chunk contains one species.
+    const ambiguousNearest = new Set();
+    for (const chunk of radar?.entityChunks ?? []) {
+      const species = Object.entries(chunk.counts ?? {}).filter(
+        ([, count]) => Number.isFinite(count) && count > 0,
+      );
+      for (const [name, count] of species) {
+        const mob = (mobs[name] ??= { count: 0 });
+        mob.count += count;
+        if (species.length !== 1 || !Number.isFinite(chunk.nearest)) {
+          ambiguousNearest.add(name);
+          continue;
+        }
+        const near = round(chunk.nearest, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
+    }
+    for (const name of ambiguousNearest) delete mobs[name].nearest;
+  }
   const drops = (radar?.drops ?? []).map((d) => ({ at: at(d.center, step), items: d.items }));
   return { players, named, mobs, drops };
 }
@@ -66,7 +92,13 @@ export function startRadar({
   const timer = setInterval(() => {
     let state;
     try {
-      state = radarState(sample(bot, { ...options, local: false }).radar, { step });
+      const sampled = sample(bot, {
+        ...options,
+        local: false,
+        radar: { ...options.radar, entities: "list" },
+      });
+      if (!sampled?.radar || sampled.radar.known === false) return;
+      state = radarState(sampled.radar, { step });
     } catch {
       return;
     }

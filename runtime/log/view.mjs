@@ -1,6 +1,9 @@
-import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import lockfile from "proper-lockfile";
 import { logFile } from "./store.mjs";
 
 /**
@@ -24,10 +27,15 @@ export function readCursor(dir) {
   }
 }
 
-export function writeCursor(dir, cursor) {
+async function writeCursor(dir, cursor) {
   const file = cursorFile(dir);
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(cursor)}\n`);
-  renameSync(`${file}.tmp`, file);
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(cursor)}\n`);
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 /** The sources that have a log file, in a stable order: runtime first. */
@@ -55,13 +63,26 @@ function parseLines(text) {
   return entries;
 }
 
-/** Every entry of a source, oldest first; `older` adds the rotated file. */
+/** Every entry of a source, oldest first; `older` adds the retained rotated file. */
 export function readEntries(dir, source, { older = false } = {}) {
-  const read = (file) => (existsSync(file) ? parseLines(readFileSync(file, "utf8")) : []);
-  return [
-    ...(older ? read(join(dir, `${source}.1.jsonl`)) : []),
-    ...read(logFile(dir, source)),
-  ];
+  const read = (file) => {
+    try {
+      return parseLines(readFileSync(file, "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  };
+  // Read current first: a concurrent rotation may move those entries into
+  // .1 before it is read, so merge by sequence and drop that overlap.
+  const entries = [...read(logFile(dir, source)), ...(older ? read(join(dir, `${source}.1.jsonl`)) : [])];
+  const numbered = new Map();
+  const unnumbered = [];
+  for (const entry of entries) {
+    if (Number.isSafeInteger(entry.seq)) numbered.set(entry.seq, entry);
+    else unnumbered.push(entry);
+  }
+  return [...unnumbered, ...numbered.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
 }
 
 export const clock = (at) => new Date(at).toISOString().slice(11, 19);
@@ -181,10 +202,10 @@ export async function readLog({
   });
   return {
     text,
-    commit() {
+    async commit() {
       // One character's view leaves the others' entries unread.
       if (selection.fromCursor && !peek && !bot)
-        commitCursor(dir, selection.advances);
+        await commitCursor(dir, selection.advances);
     },
   };
 }
@@ -199,26 +220,36 @@ function selectEntries({ dir, sources, bot, since, all }) {
   const sections = [];
   const advances = new Map();
   for (const source of wanted.filter((name) => known.includes(name))) {
-    const entries = readEntries(dir, source, { older: !fromCursor });
+    const entries = readEntries(dir, source, { older: true });
     const after = cursor[source] ?? 0;
     const shown = entries.filter(
       (entry) =>
         (!bot || !entry.bot || entry.bot === bot) &&
         (fromCursor ? entry.seq > after : since === undefined || entry.at >= since),
     );
-    if (fromCursor && entries.length)
-      advances.set(source, Math.max(after, entries.at(-1).seq));
+    if (fromCursor && entries.length && entries.at(-1).seq > after)
+      advances.set(source, entries.at(-1).seq);
     if (shown.length) sections.push({ source, entries: shown });
   }
   return { fromCursor, sections, unknown, known, advances };
 }
 
-/** Merge only this view's advances; this shared cursor does not serialize CLI processes. */
-function commitCursor(dir, advances) {
-  const cursor = { ...readCursor(dir) };
-  for (const [source, seq] of advances)
-    cursor[source] = Math.max(cursor[source] ?? 0, seq);
-  writeCursor(dir, cursor);
+/** Merge only this view's advances while serializing competing CLI commits. */
+async function commitCursor(dir, advances) {
+  if (!advances.size) return;
+  const file = cursorFile(dir);
+  const release = await lockfile.lock(file, {
+    realpath: false,
+    retries: { retries: 50, factor: 1.2, minTimeout: 5, maxTimeout: 50 },
+  });
+  try {
+    const cursor = { ...readCursor(dir) };
+    for (const [source, seq] of advances)
+      cursor[source] = Math.max(cursor[source] ?? 0, seq);
+    await writeCursor(dir, cursor);
+  } finally {
+    await release();
+  }
 }
 
 /** Render selected entries without changing the read position. */

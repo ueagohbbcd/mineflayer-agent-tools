@@ -45,6 +45,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { socketPath } from "../socket-path.mjs";
 import { readLog } from "../log/view.mjs";
+import { writeLogResult } from "../log/output.mjs";
 
 const stateDir = resolve(process.env.MF_STATE_DIR || join(process.cwd(), ".mf"));
 const controlSocket = socketPath(stateDir, "control.sock");
@@ -260,8 +261,7 @@ async function main() {
     case "log": {
       // Read straight from the files: it works with the supervisor stopped too.
       const result = await readLog({ dir: join(stateDir, "log"), ...options });
-      process.stdout.write(result.text);
-      result.commit();
+      await writeLogResult(result);
       return;
     }
     case "idle":

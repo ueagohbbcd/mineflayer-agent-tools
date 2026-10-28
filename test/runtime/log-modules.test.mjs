@@ -56,20 +56,32 @@ test("radar logs arrivals, departures and changes, never every sample", async ()
   let radar = {
     players: [{ name: "Steve", position: { x: 10, y: 64, z: 3 }, team: "blue", relation: "opponent", visibility: "visible" }],
     named: [],
-    entityChunks: [{ counts: { zombie: 2 }, nearest: 12 }],
+    entities: [
+      { name: "zombie", distance: 12 },
+      { name: "zombie", distance: 11 },
+    ],
     drops: [],
   };
   const timers = [];
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = (fn) => (timers.push(fn), 0);
-  const running = startRadar({ bot: {}, log, sample: () => ({ radar }) });
+  let sampleOptions;
+  const running = startRadar({
+    bot: {},
+    log,
+    sample: (_bot, options) => {
+      sampleOptions = options;
+      return { radar };
+    },
+  });
   globalThis.setInterval = realSetInterval;
   const tick = timers[0];
   tick();
   tick(); // Unchanged.
+  assert.equal(sampleOptions.radar.entities, "list");
   radar = { ...radar, players: [{ ...radar.players[0], position: { x: 30, y: 64, z: 3 } }] };
   tick();
-  radar = { ...radar, players: [], entityChunks: [] };
+  radar = { ...radar, players: [], entities: [] };
   tick();
   running.close();
   await running.flush();
@@ -84,8 +96,72 @@ test("radar logs arrivals, departures and changes, never every sample", async ()
     ],
   );
   assert.deepEqual(entries[0].data, { name: "Steve", at: [8, 64, 0], team: "blue", relation: "opponent", visibility: "visible" });
-  assert.deepEqual(entries[1].data, { zombie: { count: 2, nearest: 16 } });
+  assert.deepEqual(entries[1].data, { zombie: { count: 2, nearest: 8 } });
   assert.deepEqual(radarState({ players: [{ name: "a", position: { x: 1, y: 2, z: 3 } }] }, { step: 0 }).players.a.at, [1, 2, 3]);
+});
+
+test("radar preserves per-species nearest distances and marks mixed chunks ambiguous", () => {
+  assert.deepEqual(
+    radarState(
+      {
+        entities: [
+          { name: "zombie", distance: 11 },
+          { name: "cow", distance: 3 },
+          { name: "zombie", distance: 6 },
+        ],
+      },
+      { step: 1 },
+    ).mobs,
+    {
+      zombie: { count: 2, nearest: 6 },
+      cow: { count: 1, nearest: 3 },
+    },
+  );
+  assert.deepEqual(
+    radarState(
+      {
+        entityChunks: [
+          { counts: { zombie: 1, cow: 1 }, nearest: 3 },
+          { counts: { zombie: 2 }, nearest: 9 },
+        ],
+      },
+      { step: 1 },
+    ).mobs,
+    { zombie: { count: 3 }, cow: { count: 1 } },
+  );
+});
+
+test("unknown radar samples do not report departures or empty mobs", async () => {
+  const { entries, log } = posted();
+  const visible = {
+    known: true,
+    players: [{ name: "Steve", position: { x: 2, y: 64, z: 3 } }],
+    named: [],
+    entityChunks: [{ counts: { zombie: 1 }, nearest: 4 }],
+    drops: [],
+  };
+  let radar = visible;
+  const timers = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn) => (timers.push(fn), 0);
+  const running = startRadar({ bot: {}, log, sample: () => ({ radar }) });
+  globalThis.setInterval = realSetInterval;
+  const tick = timers[0];
+  tick();
+  radar = { known: false, players: [], named: [], entityChunks: [], drops: [] };
+  tick();
+  radar = visible;
+  tick();
+  running.close();
+  await running.flush();
+
+  assert.deepEqual(
+    entries.map(({ type, data }) => [type, data.name ?? data]),
+    [
+      ["appeared", "Steve"],
+      ["mobs", { zombie: { count: 1, nearest: 8 } }],
+    ],
+  );
 });
 
 test("danger: health events and risk alerts, urgent ones marked; hunger and air once each", async () => {
