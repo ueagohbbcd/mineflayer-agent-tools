@@ -17,6 +17,7 @@ import {
 } from "../observation/nearby-connected-blocks.mjs";
 import { LogClient } from "../log/client.mjs";
 import { clock } from "../log/view.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 
 const point = (p) => [p.x, p.y, p.z];
 const keyOf = (p) => `${p.x},${p.y},${p.z}`;
@@ -32,14 +33,10 @@ export function startExplore({
   maxSeen = 500_000,
   scan = sampleNearbyConnectedBlocks,
 }) {
-  const writes = new Set();
-  const write = (data, options) => {
-    const done = Promise.resolve(log.post(data, options)).catch((error) =>
-      console.error(`explore: log failed: ${error.message}`),
-    );
-    writes.add(done);
-    done.finally(() => writes.delete(done));
-  };
+  const writes = createPendingWrites((error) =>
+    console.error(`explore: log failed: ${error.message}`),
+  );
+  const write = (data, options) => writes.track(() => log.post(data, options));
   const seen = new Map(); // "dimension x,y,z" -> block name
   let signs = "[]";
   function once() {
@@ -91,7 +88,7 @@ export function startExplore({
   const timer = setInterval(once, sampleMs);
   return {
     scan: once,
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     close: () => clearInterval(timer),
   };
 }

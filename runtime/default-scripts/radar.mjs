@@ -13,9 +13,10 @@
 //
 // `mf log --source radar` shows what came and went since you last read it,
 // and the latest positions and counts.
-import { sampleObservation } from "../observation/snapshot.mjs";
+import { sampleRadar } from "../observation/snapshot.mjs";
 import { observationOptionsFromSession } from "../observation/session-options.mjs";
 import { LogClient } from "../log/client.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 
 const round = (value, step) => (step > 0 ? Math.round(value / step) * step : Math.round(value));
 const at = (p, step) => p && [round(p.x, step), round(p.y, step), round(p.z, step)];
@@ -37,11 +38,37 @@ export function radarState(radar, { step = 8 } = {}) {
     (radar?.named ?? []).map((e) => [e.customName ?? e.name, { name: e.name, at: at(e.position, step) }]),
   );
   const mobs = {};
-  for (const chunk of radar?.entityChunks ?? [])
-    for (const [name, count] of Object.entries(chunk.counts ?? {})) {
-      const near = round(chunk.nearest ?? 0, step);
-      mobs[name] = { count: (mobs[name]?.count ?? 0) + count, nearest: Math.min(mobs[name]?.nearest ?? Infinity, near) };
+  if (Array.isArray(radar?.entities)) {
+    for (const entity of radar.entities) {
+      const name = entity.name ?? "unknown";
+      const mob = (mobs[name] ??= { count: 0 });
+      mob.count++;
+      if (Number.isFinite(entity.distance)) {
+        const near = round(entity.distance, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
     }
+  } else {
+    // Older callers can still pass chunk summaries. A chunk's `nearest` is
+    // only attributable to a species when that chunk contains one species.
+    const ambiguousNearest = new Set();
+    for (const chunk of radar?.entityChunks ?? []) {
+      const species = Object.entries(chunk.counts ?? {}).filter(
+        ([, count]) => Number.isFinite(count) && count > 0,
+      );
+      for (const [name, count] of species) {
+        const mob = (mobs[name] ??= { count: 0 });
+        mob.count += count;
+        if (species.length !== 1 || !Number.isFinite(chunk.nearest)) {
+          ambiguousNearest.add(name);
+          continue;
+        }
+        const near = round(chunk.nearest, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
+    }
+    for (const name of ambiguousNearest) delete mobs[name].nearest;
+  }
   const drops = (radar?.drops ?? []).map((d) => ({ at: at(d.center, step), items: d.items }));
   return { players, named, mobs, drops };
 }
@@ -49,20 +76,29 @@ export function radarState(radar, { step = 8 } = {}) {
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Watch one bot; returns { close(), flush() }. */
-export function startRadar({ bot, log, sampleMs = 2000, step = 8, options = {}, sample = sampleObservation }) {
-  const writes = new Set();
-  const write = (data, opts) => {
-    const done = Promise.resolve(log.post(data, opts)).catch((error) =>
-      console.error(`radar: log failed: ${error.message}`),
-    );
-    writes.add(done);
-    done.finally(() => writes.delete(done));
-  };
+export function startRadar({
+  bot,
+  log,
+  sampleMs = 2000,
+  step = 8,
+  options = {},
+  sample = (bot, options) => ({ radar: sampleRadar(bot, options) }),
+}) {
+  const writes = createPendingWrites((error) =>
+    console.error(`radar: log failed: ${error.message}`),
+  );
+  const write = (data, opts) => writes.track(() => log.post(data, opts));
   let last = { players: {}, named: {}, mobs: {}, drops: [] };
   const timer = setInterval(() => {
     let state;
     try {
-      state = radarState(sample(bot, { ...options, local: false }).radar, { step });
+      const sampled = sample(bot, {
+        ...options,
+        local: false,
+        radar: { ...options.radar, entities: "list" },
+      });
+      if (!sampled?.radar || sampled.radar.known === false) return;
+      state = radarState(sampled.radar, { step });
     } catch {
       return;
     }
@@ -79,7 +115,7 @@ export function startRadar({ bot, log, sampleMs = 2000, step = 8, options = {}, 
     last = state;
   }, sampleMs);
   return {
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     close: () => clearInterval(timer),
   };
 }

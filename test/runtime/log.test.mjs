@@ -1,20 +1,57 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { utimes, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
+import lockfile from "proper-lockfile";
 import {
   LogClient,
   LogStore,
   createLogServer,
   genericLines,
+  readCursor,
   readLog,
 } from "../../runtime/log/index.mjs";
+import { writeLogResult } from "../../runtime/log/output.mjs";
+
+const mf = fileURLToPath(new URL("../../runtime/bin/mf.mjs", import.meta.url));
 
 async function tempDir(t) {
   const dir = await mkdtemp(join(tmpdir(), "mf-log-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
+}
+
+function startMfLog(stateDir, source) {
+  const child = spawn(process.execPath, [mf, "log", "--source", source], {
+    env: { ...process.env, MF_STATE_DIR: stateDir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  let didClose = false;
+  let outputReady;
+  const output = new Promise((resolve) => (outputReady = resolve));
+  const closed = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      didClose = true;
+      resolve({ code, signal, stdout, stderr });
+    });
+  });
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+    outputReady();
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+  return { output, closed, isClosed: () => didClose };
+}
+
+function runMfLog(stateDir, source) {
+  return startMfLog(stateDir, source).closed;
 }
 
 const at = (h, m, s) => Date.UTC(2026, 9, 24, h, m, s);
@@ -68,21 +105,70 @@ test("mf log shows what is new per source, once, and the read position survives"
   );
   // Not read until it was printed.
   assert.match((await readLog({ dir })).text, /chat: 2 new/);
-  first.commit();
+  await first.commit();
   assert.equal((await readLog({ dir })).text, "nothing new since you last read the log\n");
 
   store.append({ source: "chat", type: "chat", data: { text: "three" } });
   // --peek and --source leave the rest unread.
   const peek = await readLog({ dir, peek: true });
-  peek.commit();
+  await peek.commit();
   const runtimeOnly = await readLog({ dir, sources: ["runtime", "nope"] });
   assert.match(runtimeOnly.text, /^nothing new/);
   assert.match(runtimeOnly.text, /no log yet for: nope/);
-  runtimeOnly.commit();
+  await runtimeOnly.commit();
   assert.match((await readLog({ dir })).text, /chat: 1 new[^]*three/);
   // --all shows everything kept, read or not, and moves nothing.
   const all = await readLog({ dir, all: true });
   assert.match(all.text, /chat: 3 shown/);
+});
+
+test("interleaved log commits merge only their sources and never rewind", async (t) => {
+  const dir = await tempDir(t);
+  const store = new LogStore({ dir, now: () => at(12, 0, 0) });
+  store.append({ source: "chat", data: "one" });
+  store.append({ source: "runtime", data: "two" });
+
+  const chat = await readLog({ dir, sources: ["chat"] });
+  assert.deepEqual(Object.keys(chat).sort(), ["commit", "text"]);
+  const runtime = await readLog({ dir, sources: ["runtime"] });
+  await runtime.commit();
+  await chat.commit();
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "cursor.json"), "utf8")), {
+    chat: 1,
+    runtime: 2,
+  });
+
+  store.append({ source: "chat", data: "three" });
+  const olderChatRead = await readLog({ dir, sources: ["chat"] });
+  store.append({ source: "chat", data: "four" });
+  const newerChatRead = await readLog({ dir, sources: ["chat"] });
+  await newerChatRead.commit();
+  await olderChatRead.commit();
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "cursor.json"), "utf8")), {
+    chat: 4,
+    runtime: 2,
+  });
+  assert.equal(
+    (await readLog({ dir, sources: ["chat"] })).text,
+    "nothing new since you last read the log\n",
+  );
+});
+
+test("plain reads include rotated entries and deduplicate overlap by sequence", async (t) => {
+  const dir = await tempDir(t);
+  const older = { seq: 1, at: at(12, 0, 0), source: "chat", type: "chat", data: "before rotation" };
+  const moved = { seq: 2, at: at(12, 0, 1), source: "chat", type: "chat", data: "moved while reading" };
+  const current = { seq: 3, at: at(12, 0, 2), source: "chat", type: "chat", data: "after rotation" };
+  await writeFile(join(dir, "chat.1.jsonl"), `${JSON.stringify(older)}\n${JSON.stringify(moved)}\n`);
+  await writeFile(join(dir, "chat.jsonl"), `${JSON.stringify(moved)}\n${JSON.stringify(current)}\n`);
+
+  const result = await readLog({ dir });
+  assert.match(result.text, /chat: 3 new/);
+  assert.match(result.text, /before rotation/);
+  assert.equal(result.text.match(/moved while reading/g)?.length, 1);
+  assert.match(result.text, /after rotation/);
+  await result.commit();
+  assert.deepEqual(readCursor(dir), { chat: 3 });
 });
 
 test("the generic view keeps the newest per key and folds repeats", () => {
@@ -136,8 +222,78 @@ test("--bot shows one character and leaves the read position alone", async (t) =
   store.append({ source: "runtime", bot: "red2", data: { stop: "death" } });
   const red1 = await readLog({ dir, bot: "red1" });
   assert.match(red1.text, /runtime: 1 new/);
-  red1.commit();
+  await red1.commit();
   assert.match((await readLog({ dir })).text, /runtime: 2 new/);
+});
+
+test("cursor commits from separate mf processes merge under contention", async (t) => {
+  const stateDir = await tempDir(t);
+  const dir = join(stateDir, "log");
+  await mkdir(dir, { recursive: true });
+  const sources = ["parallel-a", "parallel-b", "parallel-c", "parallel-d", "parallel-e", "parallel-f"];
+  for (const [index, source] of sources.entries()) {
+    const entry = { seq: index + 1, at: at(12, 0, index), source, type: "note", data: source };
+    await writeFile(join(dir, `${source}.jsonl`), `${JSON.stringify(entry)}\n`);
+  }
+
+  const release = await lockfile.lock(join(dir, "cursor.json"), { realpath: false });
+  const processes = sources.map((source) => startMfLog(stateDir, source));
+  try {
+    await Promise.all(processes.map((child) => child.output));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.ok(processes.every((child) => !child.isClosed()), "all readers should be waiting for the held cursor lock");
+  } finally {
+    await release();
+  }
+
+  const results = await Promise.all(processes.map((child) => child.closed));
+  for (const [index, result] of results.entries()) {
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(sources[index]));
+  }
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "cursor.json"), "utf8")), {
+    "parallel-a": 1,
+    "parallel-b": 2,
+    "parallel-c": 3,
+    "parallel-d": 4,
+    "parallel-e": 5,
+    "parallel-f": 6,
+  });
+});
+
+test("a failed cursor write releases its lock so a later commit can proceed", async (t) => {
+  const dir = await tempDir(t);
+  const store = new LogStore({ dir, now: () => at(12, 0, 0) });
+  store.append({ source: "chat", data: "still unread after failed commit" });
+  const result = await readLog({ dir });
+  const cursor = join(dir, "cursor.json");
+  await mkdir(cursor);
+
+  await assert.rejects(result.commit());
+  assert.equal(await lockfile.check(cursor, { realpath: false }), false);
+  await rm(cursor, { recursive: true, force: true });
+
+  const retry = await readLog({ dir });
+  assert.match(retry.text, /still unread after failed commit/);
+  await retry.commit();
+  assert.deepEqual(readCursor(dir), { chat: 1 });
+});
+
+test("a failed stdout write does not consume the rendered log", async (t) => {
+  const dir = await tempDir(t);
+  const store = new LogStore({ dir, now: () => at(12, 0, 0) });
+  store.append({ source: "chat", data: "retry this output" });
+  const result = await readLog({ dir });
+
+  const output = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback(new Error("stdout closed"));
+    },
+  });
+  output.on("error", () => {});
+  await assert.rejects(writeLogResult(result, output), /stdout closed/);
+  assert.deepEqual(readCursor(dir), {});
+  assert.match((await readLog({ dir })).text, /retry this output/);
 });
 
 test("a program writes through LogClient over the socket; describe adds who wrote it", async (t) => {
@@ -166,4 +322,18 @@ test("a program writes through LogClient over the socket; describe adds who wrot
   const raw = await readLog({ dir, raw: true, all: true });
   assert.match(raw.text, / ! danger \(fish\.mjs\) \{"seen":"creeper"\}/);
   assert.match(raw.text, / - bait \(fish\.mjs\) \{"left":3\}/);
+});
+
+
+test("an abandoned stale cursor lock can be recovered", async (t) => {
+  const dir = await tempDir(t);
+  const store = new LogStore({ dir });
+  store.append({ source: "chat", data: "after a crashed reader" });
+  const lock = join(dir, "cursor.json.lock");
+  await mkdir(lock);
+  const old = new Date(Date.now() - 60_000);
+  await utimes(lock, old, old);
+  const result = await readLog({ dir });
+  await result.commit();
+  assert.deepEqual(readCursor(dir), { chat: 1 });
 });

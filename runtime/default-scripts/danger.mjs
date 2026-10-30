@@ -13,22 +13,19 @@
 //
 // Deaths and disconnects are not here: the runtime logs them as stops.
 import { watchObservation } from "../observation/events.mjs";
-import { sampleObservation } from "../observation/snapshot.mjs";
+import { minimalDangerSample } from "../observation/snapshot.mjs";
 import { LogClient } from "../log/client.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 
 const KEEP = new Set(["health_loss", "hurt", "critical_health"]);
 const STAMP = ["observedAt", "sampledAt", "epoch", "sequence"];
 
 /** Watch one bot; `log` is a LogClient (or anything with its `post`). Returns { close(), flush() }. */
-export function startDanger({ bot, log, sampleMs = 1000, sample = sampleObservation }) {
-  const writes = new Set();
-  const write = (data, options) => {
-    const done = Promise.resolve(log.post(data, options)).catch((error) =>
-      console.error(`danger: log failed: ${error.message}`),
-    );
-    writes.add(done);
-    done.finally(() => writes.delete(done));
-  };
+export function startDanger({ bot, log, sampleMs = 1000, sample = minimalDangerSample }) {
+  const writes = createPendingWrites((error) =>
+    console.error(`danger: log failed: ${error.message}`),
+  );
+  const write = (data, options) => writes.track(() => log.post(data, options));
   const events = watchObservation(bot, {
     lifecycleEvents: false,
     post({ priority, data }) {
@@ -79,7 +76,7 @@ export function startDanger({ bot, log, sampleMs = 1000, sample = sampleObservat
     }
   }, sampleMs);
   return {
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     close() {
       clearInterval(timer);
       events.close?.();

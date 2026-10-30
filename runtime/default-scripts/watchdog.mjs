@@ -9,6 +9,7 @@
 // into your working directory and change what is passed to createTrendWatch.
 import { LogClient } from "../log/client.mjs";
 import { createTrendWatch } from "../observation/trend-watch.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 
 const MOVES = ["forward", "back", "left", "right"];
 const inventoryKey = (bot) =>
@@ -26,14 +27,14 @@ export function startTrendWatchdog({
   ...thresholds
 }) {
   const watch = createTrendWatch(thresholds);
-  const writes = new Set();
+  const writes = createPendingWrites((error) =>
+    console.error(`watchdog: log failed: ${error.message}`),
+  );
   const send = (findings) => {
     for (const { type, urgent, message, ...rest } of findings) {
-      const write = Promise.resolve(
+      writes.track(() =>
         log.post({ message, ...rest }, { type, ...(urgent ? { urgent: true } : {}) }),
-      ).catch((error) => console.error(`watchdog: log failed: ${error.message}`));
-      writes.add(write);
-      write.finally(() => writes.delete(write));
+      );
     }
   };
   const timer = setInterval(() => {
@@ -61,7 +62,7 @@ export function startTrendWatchdog({
   bot.on("death", onDeath);
   bot.on("chat", onChat);
   return {
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     close() {
       clearInterval(timer);
       bot.off("diggingCompleted", onDig);

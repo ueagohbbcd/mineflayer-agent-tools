@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import { LogClient } from "../log/client.mjs";
 import { clock } from "../log/view.mjs";
+import { createPendingWrites } from "../log/pending-writes.mjs";
 import { setting } from "../env.mjs";
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -30,13 +31,11 @@ export function chatWakes(text, { mode = "none", username } = {}) {
 export function startChatLog({ bot, log, wake = setting("CHAT_WAKE") || "none" }) {
   if (!["none", "mention", "all"].includes(wake))
     throw new Error("MF_CHAT_WAKE must be none, mention or all");
-  const writes = new Set();
+  const writes = createPendingWrites();
   const post = (channel, sender, text, urgent) => {
-    const write = Promise.resolve(
+    writes.track(() =>
       log.post({ sender, text }, { type: channel, ...(urgent ? { urgent: true } : {}) }),
-    ).catch(() => {});
-    writes.add(write);
-    write.finally(() => writes.delete(write));
+    );
   };
   const onChat = (username, message) => {
     if (username === bot.username) return;
@@ -55,12 +54,12 @@ export function startChatLog({ bot, log, wake = setting("CHAT_WAKE") || "none" }
   bot.on("messagestr", onMessage);
   return {
     /** Wait until every line so far has been written. */
-    flush: () => Promise.all([...writes]),
+    flush: writes.flush,
     async close() {
       bot.off("chat", onChat);
       bot.off("whisper", onWhisper);
       bot.off("messagestr", onMessage);
-      await Promise.all([...writes]);
+      await writes.flush();
     },
   };
 }
