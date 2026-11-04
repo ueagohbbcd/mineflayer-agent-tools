@@ -86,10 +86,14 @@ test('a synchronous loop is reported from the worker', async t => {
   fs.writeFileSync(handler, "import fs from 'node:fs'\nexport default (event, context) => fs.writeFileSync(context.out, JSON.stringify(event))\n")
   const dog = watchdog(fakeBot(), { report () {}, blockedMs: 300, onBlocked: handler, blockedContext: { out } })
   t.after(() => dog.close())
-  await delay(200) // Let the worker start.
-  const until = Date.now() + 1500
-  while (Date.now() < until && !fs.existsSync(out)) {} // Hold the main thread.
-  const event = JSON.parse(fs.readFileSync(out, 'utf8'))
+  await delay(500) // Let the worker start (slower while other test files render).
+  const until = Date.now() + 5000
+  // Hold the main thread until the handler's write is complete: the file can
+  // exist a moment before its content does.
+  const read = () => { try { return JSON.parse(fs.readFileSync(out, 'utf8')) } catch { return null } }
+  let event = null
+  while (Date.now() < until && !(event = read())) {}
+  assert.ok(event, 'onBlocked wrote no event while the main thread was held')
   assert.equal(event.type, 'blocked')
   assert.equal(event.urgent, true)
 })

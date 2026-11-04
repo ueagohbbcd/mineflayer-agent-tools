@@ -70,7 +70,7 @@ test("system lines are logged without waking; action-bar lines are not", async (
   assert.equal(bot.listenerCount("messagestr"), 0);
 });
 
-test("mf log shows chat as the game does, marked as other players' words", () => {
+test("the chat summary shows chat as the game does, marked as other players' words", () => {
   const at = Date.UTC(2026, 9, 24, 12, 3, 5);
   const lines = summarize([
     { at, type: "chat", data: { sender: "Steve", text: "hi" } },

@@ -28,31 +28,22 @@ const { block, source, observedAt } = readWorldBlock(bot, { x, y, z }, memory);
 
 When a decision depends on shape (a doorway, a wall, stacked floors), take a picture instead of reading many blocks:
 
-```js
-import {
-  observationViewBounds,
-  surfaceSnapshotFromBot,
-  renderTexturedSurface,
-  saveRender,
-} from "mineflayer-world-memory/live.mjs";
-
-const view = observationViewBounds(bot, { viewRadius: 12 });
-const snapshot = surfaceSnapshotFromBot(bot, view.local.bounds);
-const { imagePath } = await saveRender(
-  renderTexturedSurface(snapshot, { width: 512, height: 512 }),
-  "./views/here",
-);
+```sh
+node game.mjs query <toolkit>/examples/screenshot.mjs                         # around your feet, two corner views
+node game.mjs query <toolkit>/examples/screenshot.mjs -20 60 -20 20 80 20 top # a box from above, north up
+node game.mjs query <toolkit>/examples/screenshot.mjs -19 60 -19 19 70 19 se open grid  # cutaway with block lines
+node game.mjs query <toolkit>/examples/pick.mjs out/shot-3.png 410 285       # the block under that pixel
 ```
 
-North is up. Blank cells were not received. `snapshotFromBot` + `renderOblique` draws a small 3D box as plain cubes; read the `.png.json` beside the image for bounds and what is known. Pictures cost time and tokens; use `blockAt` and `findBlocks` for exact coordinates.
+Only blocks inside the box are drawn, so a box that stops below a roof or inside a wall shows the interior. Missing cells were not received, not air. It needs the renderer's native parts (see `game/visual/README.md`); pictures cost time and tokens, so use `blockAt` and `findBlocks` for exact coordinates. `mineflayer-world-memory/live.mjs` also has a cheap top-down `renderTexturedSurface`.
 
 ## Trees
 
 `queryTreeCandidate({ blockAt: (p) => bot.blockAt(p), seed })` from `mineflayer-world-memory/queries.mjs` turns one log into the connected logs of that tree, with leaf evidence and where the search stopped. Your program decides which logs to dig.
 
-## In the background, under `mf`
+## Observers in the game process
 
-`mf run --keep "$MF_TOOLKIT_ROOT/runtime/default-scripts/radar.mjs"` logs players and named entities coming and going, where players are, mob counts and drops; `explore.mjs` logs blocks you have not seen before and sign text, and `mf log` sums the blocks up as types and counts. Both are read-only and write to `mf log`.
+main starts `radar` (players and named entities coming and going, where players are, mob counts, drops) and `explore` (blocks you have not seen before, sign text). They only record: `node report.mjs radar` / `node report.mjs explore [minutes]` show them, explore summed up as block types and counts.
 
 ## Examples
 

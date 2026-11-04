@@ -11,7 +11,7 @@ const posted = () => {
 };
 const at = (s) => Date.UTC(2026, 9, 24, 12, 0, s);
 
-test("explore logs only blocks it has not seen, and mf log sums them up", async () => {
+test("explore logs only blocks it has not seen, and its summary sums them up", async () => {
   const { entries, log } = posted();
   const bot = { entity: { position: { x: 0.5, y: 64, z: 0.5 }, eyeHeight: 1.62 }, blockAt: () => null, game: { dimension: "overworld" } };
   let blocks = [

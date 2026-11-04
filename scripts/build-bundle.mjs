@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds bundle/mineflayer-agent, the one-skill bundle, from skills/:
-// mf-basics is its SKILL.md, each other skill becomes references/<name>.md,
+// mineflayer-game is its SKILL.md, each other skill becomes references/<name>.md,
 // and each one's intro.md is its paragraph in the bundle's "Guides".
 // Run after changing a skill; test/bundle.test.mjs checks it is up to date.
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TOP = "mf-basics";
+const TOP = "mineflayer-game";
 const NAME = "mineflayer-agent";
 const ORDER = [
   "mineflayer-programs",
@@ -18,7 +18,7 @@ const ORDER = [
   "mineflayer-survival",
 ];
 const DESCRIPTION =
-  "Play Minecraft Java through a real Mineflayer bot, all in one skill: running the character and programs with mf, the game log, the work loop, the example programs, and guides on writing programs and setup, moving, looking at the world, items and survival. Use it instead of the separate mf-basics and mineflayer-* skills.";
+  "Play Minecraft Java through a real Mineflayer bot, all in one skill: one game process that holds the character, tasks and queries, keeping a wait running for notices, looking at the world, the example tasks, and guides on writing tasks and setup, moving, looking, items and survival. Use it instead of the separate mineflayer-* skills.";
 
 const body = (text) => text.replace(/^---\n[^]*?\n---\n+/, "");
 const generated = (source) =>
@@ -34,7 +34,7 @@ function relink(text, names, { inReferences }) {
       names.includes(name) ? `[${name}](${ref(name)})` : m,
     )
     .replace(
-      /see `mf-basics`/g,
+      /see `mineflayer-game`/g,
       inReferences ? "see [SKILL.md](../SKILL.md)" : "see above",
     );
 }
