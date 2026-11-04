@@ -25,15 +25,14 @@ bot's `position` where it applies.
 | `repeat`  | The same thing `repeatCount` times within `repeatWindowMs`: the pathfinder reported `noPath`, the same non-dynamic goal was set again, or the same error was passed to `dog.failure()`. Reported once until the count drops below the limit. | `key`, `count`, `seconds`, `goal` or `error`           |
 | `blocked` | Urgent. The program did not return to its event loop for `blockedMs`, so Mineflayer could not act. See below.                                                                                                                         | `seconds`                                             |
 
-Under `mf`, the runtime also writes `stuck` and `repeat` findings as urgent
-`program-watchdog` log entries, so a waiting `mf run` returns early while
-the program continues. The library itself only calls `report`; it does not
-write logs or wake a model.
+The library itself only calls `report`; it does not write records or wake a
+model. `game/` uses only its `blocked` check (the worker writes a notice while
+the main thread is stuck); stuck-like findings there come from main's rule
+table.
 
 ## Options
 
-The default long-running watchdog (`runtime/default-scripts/watchdog.mjs`)
-uses a separate trend detector. Its `against_wall` warning counts **20 s of
+The trend detector (`game/observation/trend-watch.mjs`) is separate. Its `against_wall` warning counts **20 s of
 observed wall contact within a sliding 30 s window**, even if movement keys
 are briefly released. Only samples at most 2 s apart count as contact; an
 unobserved interval is not presumed to be wall contact. It reports once while

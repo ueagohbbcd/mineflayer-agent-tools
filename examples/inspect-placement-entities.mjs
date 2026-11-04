@@ -1,6 +1,6 @@
 /**
  * Inspect observed entity overlap at a placement target:
- *   mf run "$MF_TOOLKIT_ROOT/examples/inspect-placement-entities.mjs" X Y Z
+ *   node game.mjs query <toolkit>/examples/inspect-placement-entities.mjs X Y Z
  * X Y Z are the intended new block, not the reference block clicked by placeBlock.
  * The default entity summary can omit a nearby bat or other low-priority entity.
  * This query filters the full observed mirror before limiting its output.
@@ -14,7 +14,7 @@
  * Check mirror age and the actual target block alongside these candidates.
  * Pose-specific and server collision rules may differ from the observed boxes.
  */
-import { queryEntitiesIntersecting } from "../runtime/observation/queries.mjs";
+import { queryEntitiesIntersecting } from "../game/observation/queries.mjs";
 
 export function inspectPlacementEntities(bot, target, { limit = 12 } = {}) {
   if (!["x", "y", "z"].every((axis) => Number.isSafeInteger(target?.[axis])))
@@ -30,8 +30,7 @@ export function inspectPlacementEntities(bot, target, { limit = 12 } = {}) {
   };
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function inspectPlacementEntitiesProgram(
   bot,
@@ -39,7 +38,7 @@ export default async function inspectPlacementEntitiesProgram(
 ) {
   if (args.length !== 3 || !args.map(Number).every(Number.isSafeInteger))
     throw new Error(
-      `Usage: mf run "$MF_TOOLKIT_ROOT/examples/inspect-placement-entities.mjs" X Y Z`,
+      `Usage: node game.mjs query <toolkit>/examples/inspect-placement-entities.mjs X Y Z`,
     );
   const [x, y, z] = args.map(Number);
   log(JSON.stringify(inspectPlacementEntities(bot, { x, y, z })));

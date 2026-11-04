@@ -1,7 +1,7 @@
 /**
  * Where can I walk from here, and back? Prints a reach map, north up:
  *
- *   mf run "$MF_TOOLKIT_ROOT/examples/reach-map.mjs" [--from X Y Z] [--target X Y Z]
+ *   node game.mjs query <toolkit>/examples/reach-map.mjs [--from X Y Z] [--target X Y Z]
  *     [--steps N] [--radius N] [--one-way]
  *     [--dig] [--no-parkour] [--no-sprint] [--blocks N] [--max-drop N]
  *     [--no-water-drops] [--gates]
@@ -21,7 +21,7 @@ import { readWorldBlock } from "../reader.mjs";
 import {
   reachDefaults,
   reachMap,
-} from "../runtime/observation/reach.mjs";
+} from "../game/observation/reach.mjs";
 
 export function parseReachArgs(args) {
   const options = {};
@@ -127,8 +127,7 @@ export async function worldReader(
   return { blockAt, note };
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function reachMapProgram(
   bot,

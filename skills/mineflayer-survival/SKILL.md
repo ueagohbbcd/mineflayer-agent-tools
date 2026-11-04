@@ -17,10 +17,10 @@ The game does not wait for you. With no program running the character stands sti
 
 Right-click a bed with `await bot.activateBlock(bedBlock)` from within about two blocks, only when `bot.game.dimension` is `"overworld"`: in the Nether or the End a bed explodes. It works by day too; at night the bot also lies down (`bot.isSleeping`), and `await bot.wake()` gets it up. The game confirms with the chat line `Respawn point set`. After death (`death` event) the bot respawns at the bed while it stands and is not blocked; listen for `respawn`.
 
-## Under `mf`
+## In the game process
 
-- The `danger` background module (`mf run --keep "$MF_TOOLKIT_ROOT/runtime/default-scripts/danger.mjs"`) logs damage, risks near you (a swelling creeper, lit TNT, a projectile, something targeting you), hunger and air; the serious ones are urgent and make a waiting `mf run` return early.
-- Between programs, idle fights hostile mobs within a few blocks, eats and holds jump in water; while a program runs, keeping the character alive is that program's job.
+- The `danger` observer records damage, risks near you (a swelling creeper, lit TNT, a projectile, something targeting you), hunger and air (`node report.mjs danger`); the serious ones also come to you as notices.
+- main's rules swim up when air runs low (inside `steps` and between tasks) and notify when that is not enough. While a plugin or your own code drives the character, keeping it alive is that code's job; rules only notify. Between tasks, main's `idle` holds the character (by default: float in water); edit it in `main.mjs` to eat or defend.
 
 ## Examples
 

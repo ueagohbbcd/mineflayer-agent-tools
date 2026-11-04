@@ -6,7 +6,7 @@
  */
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
-import { sampleObservation } from "../runtime/observation/index.mjs";
+import { sampleObservation } from "../game/observation/index.mjs";
 import { loadPathfinder, loadPvp, stopBot } from "./native.mjs";
 
 export async function navigateWithDefense(

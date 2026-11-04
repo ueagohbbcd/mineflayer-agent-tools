@@ -1,6 +1,5 @@
 /** Read-only participant radar. No hostility assumptions or automatic movement. */
 import { setTimeout as sleep } from "node:timers/promises";
-import { LogClient } from "../runtime/log/index.mjs";
 
 const vector = (p) => ({ x: p.x, y: p.y, z: p.z });
 export function sampleEntities(
@@ -49,7 +48,7 @@ export function sampleEntities(
 }
 
 // Embed beside your action loop, or run the CLI once as a separate observation task.
-// Each changed sample goes to the log under one key (`mf log` shows the newest).
+// Each changed sample goes to the log under one key (report.mjs shows the newest).
 // judge(sample) optionally returns participant-authored facts/question, or null;
 // a new one is logged as urgent, which wakes the model.
 export async function watchEntities(
@@ -97,21 +96,19 @@ export async function watchEntities(
   }
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
-
 export default async function entityRadarProgram(
   bot,
-  { args = [], signal, log = console.log },
+  { args = [], signal, record },
 ) {
   if (args.length > 2)
-    throw new Error(
-      `Usage: mf run "$MF_TOOLKIT_ROOT/examples/entity-radar.mjs" [radius=32] [intervalMs=1000]`,
-    );
+    throw new Error("Usage: entityRadarProgram(bot, { signal, record, args: [radius=32, intervalMs=1000] })");
   const radius = Number(args[0] ?? 32),
     intervalMs = Number(args[1] ?? 1000);
   try {
-    await watchEntities(bot, new LogClient({ source: "entity-radar" }), {
+    const log = {
+      post: async (data, { type, key } = {}) => record?.("entity-radar", { ...(type ? { type } : {}), ...(key ? { key } : {}), data }),
+    };
+    await watchEntities(bot, log, {
       radius,
       intervalMs,
       signal,

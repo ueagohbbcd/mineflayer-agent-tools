@@ -2,8 +2,7 @@
 import { Vec3 } from "vec3";
 import { readWorldBlock } from "../reader.mjs";
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function queryBlockMemory(
   bot,

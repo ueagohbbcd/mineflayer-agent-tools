@@ -2,16 +2,16 @@
  * Watch loaded blocks near the character until one of a kind shows up, then
  * end with what was found:
  *
- *   mf run "$MF_TOOLKIT_ROOT/examples/watch-surroundings.mjs" [block=chest] [seconds=600]
+ *   node game.mjs task <toolkit>/examples/watch-surroundings.mjs [block=chest] [seconds=600]
  *
  * Read-only, so it runs beside the controlling program. Start it in the
  * background: its end is what tells you something was found.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import { Vec3 } from "vec3";
-import { sampleNearbyConnectedBlocks } from "../runtime/observation/nearby-connected-blocks.mjs";
+import { sampleNearbyConnectedBlocks } from "../game/observation/nearby-connected-blocks.mjs";
 
-export const control = false;
+// Read-only, but it watches for a while: run it as a task.
 
 export default async function watchSurroundings(bot, { args = [], signal }) {
   const target = args[0] ?? "chest";

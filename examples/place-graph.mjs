@@ -3,7 +3,7 @@
  * Pathfinder's own search. For looking up only: nothing moves. To go
  * somewhere, use Pathfinder (see the skill skills/mineflayer-navigation).
  *
- *   mf run "$MF_TOOLKIT_ROOT/examples/place-graph.mjs" [--file waypoints.json]
+ *   node game.mjs query <toolkit>/examples/place-graph.mjs [--file waypoints.json]
  *     [--here] [--from NAME] [--only NAME,NAME,...] [--blocks N]
  *     [--timeout MS] [--budget S] [--no-parkour] [--max-drop N]
  *
@@ -24,7 +24,7 @@ import {
   parseWaypoints,
   linkConfigs,
   placeGraph,
-} from "../runtime/observation/place-graph.mjs";
+} from "../game/observation/place-graph.mjs";
 import { worldReader } from "./reach-map.mjs";
 
 export function parsePlaceGraphArgs(args) {
@@ -84,8 +84,7 @@ export function configsFor(blocks) {
     .map((c) => (c.name === "place" ? { ...c, settings: { blocks } } : c));
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function placeGraphProgram(
   bot,
