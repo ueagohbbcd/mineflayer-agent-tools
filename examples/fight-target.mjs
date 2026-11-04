@@ -1,7 +1,7 @@
 /**
  * Attack the nearest currently observed entity among supplied entity IDs.
  * The choice and the summary are printed as JSON lines into the program's
- * own output, where `mf run` shows them.
+ * own output, where the task's log shows them.
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";

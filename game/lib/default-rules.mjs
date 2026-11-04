@@ -6,6 +6,18 @@ import { heldKeys } from './inputs.mjs'
 const TICK_MS = 50
 
 /**
+ * The player's own air, 0 to 20. bot.oxygenLevel is set from any entity's
+ * metadata (a dolphin nearby makes it tick down on land), so read our own
+ * air_supply; the server sends it only once it is below full.
+ */
+export function airOf (bot) {
+  const keys = bot?.registry?.entitiesByName?.player?.metadataKeys
+  const index = Array.isArray(keys) ? keys.indexOf('air_supply') : -1
+  const air = index >= 0 ? bot?.entity?.metadata?.[index] : undefined
+  return Number.isFinite(air) ? Math.round(air / 15) : 20
+}
+
+/**
  * Low air: hold jump (everything else released) until air is back.
  * Taking over is only recorded. It notifies when air is nearly gone, which
  * also covers a plugin that keeps the bot under water.
@@ -14,7 +26,7 @@ export function lowAir ({ below = 8, recovered = 18, critical = 3 } = {}) {
   return {
     name: 'low-air',
     check (bot, mem) {
-      const air = bot.oxygenLevel ?? 20
+      const air = airOf(bot)
       if (!mem.active && air <= below) mem.active = true
       else if (mem.active && air >= recovered) mem.active = false
       if (!mem.active) return null

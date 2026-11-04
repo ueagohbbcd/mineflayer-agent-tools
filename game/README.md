@@ -1,6 +1,6 @@
 # game：一个进程持有角色的轻量写法
 
-第 1、2 步的实现（计划见项目文件 `plans/minecraft-toolkit-rebuild-plan-v4.md`）。和旧的 `runtime/`（mf、supervisor、TaskManager）并存，迁移完成后删除旧底座。
+重构计划 v4 的实现（计划见项目文件 `plans/minecraft-toolkit-rebuild-plan-v4.md`）。旧的 `runtime/`（mf、supervisor、TaskManager、日志库）已删除。
 
 ## 组成
 
@@ -13,6 +13,9 @@
 | `lib/rules.mjs` | 一张有序规则表，三个时段：steps 里第一条给 inputs 的接管本轮；插件独占时只告警；任务之间维持角色 |
 | `lib/default-rules.mjs` | 首版规则：low-air、no-progress、repeat-death、repeat-no-path |
 | `lib/notify.mjs`、`bin/wait.mjs` | notifyModel 追加 `.game/notices.jsonl`；`wait` 打印未送达的通知后退出，只有它标记已送达 |
+| `observation/` | 只读观察函数（快照、雷达、事件、开阔空间扫描、字符地图 reachMap、地点图），原 `runtime/observation/` |
+| `observers/`、`bin/report.mjs` | chat、danger、explore、radar 观察器写 `records/<名称>.jsonl`；danger 的 urgent 条目和 MF_CHAT_WAKE 匹配的聊天也会通知。`node report.mjs [名称] [分钟]` 只读文件，不改任何状态 |
+| `queries/snapshot.mjs` | 一次完整状态采样（原 `mf snapshot`） |
 | `dev/` | 本地验证：RCON、水道场地、测试任务和查询、模拟 harness 及场景 |
 
 约定：
@@ -21,7 +24,7 @@
 - 查询与任务并行，只读是约定；超时只保证调用方不再等。
 - 主线程卡在同步代码里时 socket 无法回复：worker 写通知，`status` 等命令 5 秒超时并提示用 `stop`（SIGTERM 不响应时 SIGKILL）。
 
-任务签名：`export default async function task(bot, { signal, steps, rules, notify, record, on })`。
+任务签名：`export default async function task(bot, { args, log, signal, steps, rules, notify, record, on })`；查询签名 `query(bot, { args, log, signal, record, on })`。`log(...)` 的行进入结果（任务保留最后 30 行），查询命令先打印这些行再打印返回值。`examples/*.mjs` 可以直接 `node game.mjs task|query <toolkit>/examples/X.mjs 参数...`，也可以在任务里 import。
 
 - `steps(fn)`：每个 physicsTick 先过规则表；没有规则给出 inputs 时调用 `fn()`。`fn` 同步返回 setControlState 的键加可选 `look: { yaw, pitch }`，或 `{ done: true, result }`。没出现的键自动松开。
 - `rules.disable(name)`：本任务内关掉某条规则的 inputs，告警照常。

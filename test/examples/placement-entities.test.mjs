@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryEntitiesIntersecting } from "../../runtime/observation/queries.mjs";
-import { sampleObservation } from "../../runtime/observation/index.mjs";
+import { queryEntitiesIntersecting } from "../../game/observation/queries.mjs";
+import { sampleObservation } from "../../game/observation/index.mjs";
 import { inspectPlacementEntities } from "../../examples/inspect-placement-entities.mjs";
 
 const bounds = {

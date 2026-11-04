@@ -1,3 +1,4 @@
+import { airOf } from 'mineflayer-world-memory/game/index.mjs'
 // Starts floating in the channel. Pathfinder cannot plan from a floating
 // start, so the prebuilt loop swims to the north bank first. Then the plugin
 // goes to the far side of the lake on its own (plugin-exclusive); with default
@@ -17,7 +18,7 @@ export default async function task (bot, { steps }) {
   let minAir = 20
   let wet = 0
   const onTick = () => {
-    minAir = Math.min(minAir, bot.oxygenLevel ?? 20)
+    minAir = Math.min(minAir, airOf(bot))
     if (bot.blockAt(bot.entity.position)?.name === 'water') wet++
   }
   bot.on('physicsTick', onTick)

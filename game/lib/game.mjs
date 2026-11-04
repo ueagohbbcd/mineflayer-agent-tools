@@ -95,12 +95,13 @@ export function createGame (bot, { dir, rules = [], idle = () => null, log = con
   }
 
   /** Load a task file fresh (mtime cache-bust) and run it to the end. */
-  async function runTask (file, { notifyResult = true } = {}) {
+  async function runTask (file, { notifyResult = true, args = [] } = {}) {
     if (task) return { ok: false, busy: true, error: `已有任务 ${task.id} 在运行` }
     const abs = path.resolve(file)
     const id = `t${++taskSeq}-${path.basename(abs, path.extname(abs))}`
     const controller = new AbortController()
     const listeners = []
+    const output = []
     let settle
     task = { id, file: abs, controller, inSteps: false, done: new Promise(resolve => { settle = resolve }) }
     releaseAll(bot)
@@ -108,6 +109,12 @@ export function createGame (bot, { dir, rules = [], idle = () => null, log = con
     record('tasks', { type: 'start', task: id, file: abs })
     log(`任务 ${id} 开始`)
     const ctx = {
+      args,
+      /** A line for the result (the last 30 are kept). */
+      log: (...parts) => {
+        output.push(parts.map(p => (typeof p === 'string' ? p : JSON.stringify(p))).join(' '))
+        if (output.length > 30) output.shift()
+      },
       signal: controller.signal,
       steps: fn => steps(fn, controller.signal),
       rules: { disable: name => table.disable(name), names: () => table.names() },
@@ -148,6 +155,7 @@ export function createGame (bot, { dir, rules = [], idle = () => null, log = con
       seconds: Math.round((Date.now() - started) / 100) / 10,
       position: p ? [p.x, p.y, p.z].map(n => Math.round(n * 10) / 10) : null,
       takeovers: summarizeTakeovers(takeovers),
+      ...(output.length ? { log: output } : {}),
       ...(disabled.length ? { disabledRules: disabled } : {}),
       ...(pathfinderLeftRunning ? { note: '任务结束时寻路还有目标，已停止' } : {})
     }
@@ -160,11 +168,15 @@ export function createGame (bot, { dir, rules = [], idle = () => null, log = con
   }
 
   /** Run a read-only module against the live bot, alongside any task. */
-  async function runQuery (file, { timeoutMs = 10000 } = {}) {
+  async function runQuery (file, { timeoutMs = 10000, args = [] } = {}) {
     const abs = path.resolve(file)
     const controller = new AbortController()
     const listeners = []
+    const output = []
     const ctx = {
+      args,
+      /** Lines printed by the query command before the result. */
+      log: (...parts) => { output.push(parts.map(p => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')) },
       signal: controller.signal,
       record,
       on (emitter, event, listener) {
@@ -188,7 +200,7 @@ export function createGame (bot, { dir, rules = [], idle = () => null, log = con
       } catch (error) {
         return { ok: false, error: error?.message ?? String(error) }
       }
-    })()
+    })().then(out => (output.length ? { ...out, log: output } : out))
     const out = await Promise.race([run, timeout])
     clearTimeout(timer)
     for (const [emitter, event, listener] of listeners) emitter.removeListener(event, listener)
@@ -231,5 +243,6 @@ export function formatResult (summary) {
   if (summary.takeovers.length) lines.push(`规则接管：${summary.takeovers.join('；')}`)
   if (summary.disabledRules) lines.push(`本任务关闭的规则：${summary.disabledRules.join(', ')}`)
   if (summary.note) lines.push(summary.note)
+  if (summary.log) lines.push(`任务输出（最后 ${summary.log.length} 行）：`, ...summary.log.map(line => `  ${line}`))
   return lines.join('\n')
 }

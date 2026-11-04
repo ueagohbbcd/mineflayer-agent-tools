@@ -1,19 +1,19 @@
 # Developer guide
 
-For contributors to this repository. Agents that play through it read `skills/mf-basics/SKILL.md` (then the `mineflayer-*` skills it lists), or the bundle `bundle/mineflayer-agent/SKILL.md`, and `runtime/README.md` instead. After changing a skill, run `npm run build:bundle`.
+For contributors to this repository. Agents that play through it start from `game/README.md` and `game/template/` (the skills under `skills/` still describe the removed `mf` runtime and are being rewritten). After changing a skill, run `npm run build:bundle`.
 
 ## Two layers
 
-- **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `runtime/`, never touch a report queue, and take a callback for anything they report.
-- **Runtime** (`runtime/`, the `mf` command): character processes, one controlling program per character, the log (`mf log`), default and background modules, idle. Telling a model when a background command ends is the harness's job, not the runtime's.
+- **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `game/`, never notify a model, and take a callback for anything they report.
+- **Game** (`game/`): one process that holds the bot (`template/main.mjs`), tasks and read-only queries through a local socket, one rule table for the prebuilt loop / watchdog / idle, observers writing `records/`, `notifyModel` + `wait`. Telling a model when a background command ends is the harness's job; `wait` exiting is how a notice reaches it.
 
-Example programs (`examples/*.mjs`) sit on top of both: short `mf` modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique; two examples that do similar things in different ways stay separate. Their tests are in `test/examples/`.
+Example programs (`examples/*.mjs`) sit on top of both: short task/query modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique; two examples that do similar things in different ways stay separate. Their tests are in `test/examples/`.
 
 Scope and what not to build: [docs/project-scope.md](docs/project-scope.md).
 
 ## Who consumes it
 
-craft-arena installs this package (name `mineflayer-world-memory`) from a codeload tarball of a commit and runs `runtime/supervisor.mjs` for its characters; its participant image drops `skills/` but keeps `examples/`, which its own skills point to. The arena also installs the dependencies its images need for parts of this package (for example the renderer's), since participant containers have no network. A change here reaches the arena only when the arena bumps that commit, so run the arena's tests and `npm run verify:server` against a new commit before calling it done.
+craft-arena installs this package (name `mineflayer-world-memory`) from a codeload tarball of a commit (pinned to a commit from before `game/`, which still has `runtime/`); its participant image drops `skills/` but keeps `examples/`, which its own skills point to. The arena also installs the dependencies its images need for parts of this package (for example the renderer's), since participant containers have no network. A change here reaches the arena only when the arena bumps that commit, so run the arena's tests and `npm run verify:server` against a new commit before calling it done.
 
 ## Checks
 
@@ -22,4 +22,4 @@ npm test              # unit and fixture tests (Node 22+)
 npm run test:visual   # renderer tests (Python, renderers/requirements.txt)
 ```
 
-Runtime behaviour that unit tests cannot show (joining, deaths, real chat events) needs a local Minecraft 1.21.1 server; say so when it was not run instead of writing a test that pretends to cover it.
+Game behaviour that unit tests cannot show (joining, deaths, real chat events) needs a local Minecraft 1.21.1 server (`game/dev/`: course setup and a harness simulator); say so when it was not run instead of writing a test that pretends to cover it.

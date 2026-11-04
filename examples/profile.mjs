@@ -1,15 +1,15 @@
 /**
  * The ground along a straight line, as one line of text:
  *
- *   mf run "$MF_TOOLKIT_ROOT/examples/profile.mjs" X Z            toward a point
- *   mf run "$MF_TOOLKIT_ROOT/examples/profile.mjs" north [STEPS]  in a direction (default 32)
+ *   node game.mjs query <toolkit>/examples/profile.mjs X Z            toward a point
+ *   node game.mjs query <toolkit>/examples/profile.mjs north [STEPS]  in a direction (default 32)
  *
  * For example "flat 12 → up 3 over 3 → water 15 → wall +9 at (...)". It
  * follows the walkable surface from your feet and says where the line meets
  * a wall, a drop, water or blocks the character has not received. It is not a
  * route: use reach-map.mjs or Pathfinder for that. Read-only.
  */
-import { terrainProfile } from "../runtime/observation/reach.mjs";
+import { terrainProfile } from "../game/observation/reach.mjs";
 import { worldReader } from "./reach-map.mjs";
 
 const directions = ["north", "east", "south", "west"];
@@ -29,8 +29,7 @@ export function parseProfileArgs(args) {
   return { target: { x, z } };
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function profileProgram(
   bot,

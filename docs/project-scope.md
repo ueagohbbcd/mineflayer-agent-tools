@@ -17,23 +17,15 @@ evaluate `prismarine-world` and the Prismarine storage providers. Any migration
 must explicitly handle older saved files, dimension/version separation,
 timestamps, and the async-storage vs synchronous-query contract.
 
-The runtime (`runtime/`, the `mf` command) lets any agent with a shell play
-through a real Mineflayer bot: the bot processes, a log that `mf log` reads
-and sums up, programs with their output, idle behaviour and optional
-background modules. Running programs in the
-background and telling the model when they end is left to the harness
-(see [runtime/README.md](../runtime/README.md)). It builds on the libraries;
-the libraries never import it.
-
-Inside the runtime, a small core does not depend on any replaceable part: the
-character processes and their liveness, one controlling program per
-character, cancellation and cleanup, stops, and the log. The modules (chat,
-danger, radar, explore, the background watchdog), idle
-and the routines in `examples/` are replaceable modules on top: turning one
-off or replacing it must not change who controls a character, how a death
-stops its program, or how a blocked process is recovered. Idle only acts
-while no program controls the character; behaviour while a program runs
-(defending on a walk, say) belongs in routines the model chooses to run.
+`game/` lets any agent with a shell play through a real Mineflayer bot: one
+process (`main.mjs`, edited by the agent) holds the bot; tasks and read-only
+queries are submitted to it through a local socket; one rule table runs in
+three periods (inside the prebuilt `steps` loop it can take over a tick; while
+a plugin or native code owns the bot it only notifies; between tasks it keeps
+the character alive, with main's `idle`); observers write `records/`;
+`notifyModel` + `wait` bring the model back. Running commands in the
+background and telling the model when they end is left to the harness. It
+builds on the libraries; the libraries never import it.
 
 Arena rules, teams, Pi, trusted messages and match scheduling remain outside
 this repository.
@@ -52,9 +44,9 @@ in the harness's own input:
   Arena's Pi extension does with its platform messages. That adapter belongs
   to the caller.
 
-The runtime carries neither. Game chat is game data (`trusted: false`),
-whoever wrote it. The report queue cannot carry trust either: its socket is
-open to the model's own programs. Do not add a trusted-message path to `mf`.
+`game/` carries neither. Game chat is game data, whoever wrote it. Notices
+cannot carry trust either: the model's own code writes them too. Do not add a
+trusted-message path to `game/`.
 
 Repository name: `mineflayer-agent-tools` (renamed from `mineflayer-world-memory`).
 The package/import name stays `mineflayer-world-memory` for now, for backward
@@ -83,8 +75,6 @@ later, separate breaking change.
 - Craft Arena depends on the libraries only, through a pinned commit tarball. It
   does not install this repository's skills: it copies the parts it needs and
   rewrites them as its own smaller skills for the match rules.
-- Craft Arena can use the runtime for its participants instead of keeping its
-  own copy.
-- Libraries never import the log, a match clock or an arena session. Reporting goes
+- Libraries never import `game/`, a match clock or an arena session. Reporting goes
   through a callback or object the caller passes in (for example
   `watchdog(bot, { report })`).

@@ -1,5 +1,5 @@
 /** Build an explicit placement plan while coordinating background meals.
- * Usage: mf run "$MF_TOOLKIT_ROOT/examples/build-with-autoeat.mjs" plan.json
+ * Usage: node game.mjs task <toolkit>/examples/build-with-autoeat.mjs plan.json
  * Plan: {"material":"cobblestone","steps":[{"against":{"x":0,"y":64,"z":0},"face":{"x":0,"y":1,"z":0}}]}
  * Plan positions must be reachable from the current location. Health events
  * trigger meals; a shared hand Promise serializes equip/place/use-item.
@@ -9,7 +9,6 @@
  */
 import { readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { LogClient } from "../runtime/log/index.mjs";
 import { Vec3 } from "vec3";
 
 const foods = new Set([
@@ -240,17 +239,16 @@ export async function buildWithAutoeat(
 
 export default async function buildWithAutoeatProgram(
   bot,
-  { args = [], signal, log = console.log },
+  { args = [], signal, log = console.log, notify },
 ) {
   if (!args[0]) throw new Error("Pass a JSON placement plan");
   const plan = JSON.parse(await readFile(args[0], "utf8"));
-  const urgent = new LogClient({ source: "build" });
   // Meals and warnings as output lines; per-block progress (keyed) is left
-  // out; a warning that needs you also goes to the log as urgent.
+  // out; a warning that needs you also goes out with notify (from the task ctx).
   const reporter = {
     async post(data, { key, urgent: wake } = {}) {
       if (!key) log(JSON.stringify(data));
-      if (wake) await urgent.post(data, { type: "warning", urgent: true });
+      if (wake) notify?.(`build: ${JSON.stringify(data)}`, data);
     },
   };
   try {

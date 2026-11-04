@@ -7,14 +7,14 @@ import {
   terrainProfile,
   aroundSummary,
   cellKind,
-} from "../../runtime/observation/reach.mjs";
+} from "../../game/observation/reach.mjs";
 import { parseReachArgs } from "../../examples/reach-map.mjs";
 import {
   findLink,
   placeGraph,
   linkConfigs,
   parseWaypoints,
-} from "../../runtime/observation/place-graph.mjs";
+} from "../../game/observation/place-graph.mjs";
 import {
   parsePlaceGraphArgs,
   configsFor,

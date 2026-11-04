@@ -3,8 +3,9 @@
 // Commands for a running main.mjs. Run them in the project directory (or set
 // GAME_DIR).
 //
-//   node game.mjs task <file>          run a task; prints the result when it ends
-//   node game.mjs query <file> [sec]   run a read-only module now (default 10 s)
+//   node game.mjs task <file> [args...]    run a task; prints the result when it ends
+//   node game.mjs query <file> [args...]   run a read-only module now
+//                                          (GAME_QUERY_TIMEOUT seconds, default 10)
 //   node game.mjs cancel               ask the running task to stop
 //   node game.mjs status
 //   node game.mjs stop                 end main (then start it again)
@@ -14,7 +15,7 @@ import { formatResult } from '../lib/game.mjs'
 import { readLock, socketPath } from '../lib/server.mjs'
 
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
-const [command, arg, extra] = process.argv.slice(2)
+const [command, arg, ...rest] = process.argv.slice(2)
 
 function request (body, { timeoutMs = 0 } = {}) {
   return new Promise((resolve, reject) => {
@@ -51,19 +52,20 @@ function fail (message) {
 try {
   switch (command) {
     case 'task': {
-      if (!arg) fail('用法：node game.mjs task <file>')
-      const summary = await request({ type: 'task', file: path.resolve(arg) })
+      if (!arg) fail('用法：node game.mjs task <file> [参数...]')
+      const summary = await request({ type: 'task', file: path.resolve(arg), args: rest })
       if (summary.busy) fail(`${summary.error}。等它结束，或运行 node game.mjs cancel。`)
       console.log(formatResult(summary))
       process.exit(summary.ok ? 0 : 1)
       break
     }
     case 'query': {
-      if (!arg) fail('用法：node game.mjs query <file> [超时秒数]')
-      const seconds = Number(extra) || 10
-      const out = await request({ type: 'query', file: path.resolve(arg), timeoutMs: seconds * 1000 }, { timeoutMs: (seconds + 5) * 1000 })
+      if (!arg) fail('用法：node game.mjs query <file> [参数...]')
+      const seconds = Number(process.env.GAME_QUERY_TIMEOUT) || 10
+      const out = await request({ type: 'query', file: path.resolve(arg), timeoutMs: seconds * 1000, args: rest }, { timeoutMs: (seconds + 5) * 1000 })
+      for (const line of out.log ?? []) console.log(line)
       if (!out.ok) fail(`查询失败：${out.error}`)
-      console.log(typeof out.result === 'string' ? out.result : JSON.stringify(out.result, null, 2))
+      if (out.result !== undefined) console.log(typeof out.result === 'string' ? out.result : JSON.stringify(out.result, null, 2))
       break
     }
     case 'cancel': {

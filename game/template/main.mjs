@@ -5,23 +5,24 @@
 //                        task <file> / query <file> / cancel / status / stop
 //
 // Env: MF_HOST (localhost) MF_PORT (25565) MF_USERNAME (Bot) MF_VERSION
+// (empty = ask the server; give it for 1.21.1 to get the recipe-packet fix)
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pathfinderPkg from 'mineflayer-pathfinder'
-import { createGame, serve, takeLock, lowAir, noProgress, repeatDeath, repeatNoPath } from 'mineflayer-world-memory/game/index.mjs'
+import { createGame, serve, takeLock, startObservers, compatibleMinecraftOptions, lowAir, noProgress, repeatDeath, repeatNoPath } from 'mineflayer-world-memory/game/index.mjs'
 
 const { pathfinder, Movements } = pathfinderPkg
 const dir = path.dirname(fileURLToPath(import.meta.url))
 
 // ---- init -----------------------------------------------------------------
 takeLock(dir) // before connecting: a second main for this project exits here
-const bot = mineflayer.createBot({
+const bot = mineflayer.createBot(compatibleMinecraftOptions({
   host: process.env.MF_HOST ?? 'localhost',
   port: Number(process.env.MF_PORT ?? 25565),
   username: process.env.MF_USERNAME ?? 'Bot',
   version: process.env.MF_VERSION || undefined
-})
+}))
 bot.loadPlugin(pathfinder)
 bot.once('spawn', () => bot.pathfinder.setMovements(new Movements(bot)))
 bot.on('kicked', reason => console.log('被踢出：', reason))
@@ -53,5 +54,9 @@ function idle (bot) {
 await new Promise(resolve => bot.once('spawn', resolve))
 const game = createGame(bot, { dir, rules, idle })
 console.log(`已进入游戏：${bot.username} @ ${bot.entity.position}`)
+
+// Observers write records/<name>.jsonl (node report.mjs reads them); urgent
+// danger entries and chat matching MF_CHAT_WAKE also notify.
+startObservers(game, ['chat', 'danger', 'explore', 'radar'])
 
 await serve(game) // lock + local socket; one main per project

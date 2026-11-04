@@ -1,7 +1,7 @@
 /**
  * Pathfinder trip to X Y Z:
  *
- *   mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z [--no-dig]
+ *   node game.mjs task <toolkit>/examples/navigate.mjs X Y Z [--no-dig]
  *
  * Returns `{status: "arrived", position}`; a failed trip throws. A trip that has lasted 2 minutes without moving
  * a block in the last 30 s stops and returns `{status: "stalled", ...}` with a

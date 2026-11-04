@@ -104,11 +104,11 @@ async function handle (game, request, conn) {
     case 'task': {
       let attached = true
       conn.on('close', () => { attached = false })
-      const summary = await game.runTask(request.file, { notifyResult: () => !attached })
+      const summary = await game.runTask(request.file, { notifyResult: () => !attached, args: request.args ?? [] })
       return reply(conn, summary)
     }
     case 'query':
-      return reply(conn, await game.runQuery(request.file, { timeoutMs: request.timeoutMs }))
+      return reply(conn, await game.runQuery(request.file, { timeoutMs: request.timeoutMs, args: request.args ?? [] }))
     case 'cancel':
       return reply(conn, await game.cancel({ graceMs: request.graceMs }))
     case 'status':

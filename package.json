@@ -1,7 +1,7 @@
 {
   "name": "mineflayer-world-memory",
   "version": "0.1.0",
-  "description": "Mineflayer agent toolkit: chunk history, perception queries, visuals, watchdogs, and a shell runtime (mf) for driving characters step by step",
+  "description": "Mineflayer agent toolkit: one game process that holds the bot (game/), chunk history, perception queries, visuals and watchdogs",
   "main": "index.js",
   "license": "MIT",
   "repository": {
@@ -36,8 +36,7 @@
     "mineflayer-pvp": "^1.3.2"
   },
   "bin": {
-    "world-memory": "bin/world-memory.js",
-    "mf": "runtime/bin/mf.mjs"
+    "world-memory": "bin/world-memory.js"
   },
   "files": [
     "index.js",
@@ -60,10 +59,8 @@
     "queries.mjs",
     "watchdog.js",
     "watchdog.mjs",
-    "runtime/**/*.mjs",
     "game/**/*.mjs",
-    "game/**/*.md",
-    "runtime/**/*.md"
+    "game/**/*.md"
   ],
   "devDependencies": {
     "mineflayer": "4.39.0",

@@ -149,8 +149,7 @@ export function summarizeTerrain({
   };
 }
 
-// Read-only: runs beside the program that controls the character.
-export const control = false;
+// Read-only: run it with `node game.mjs query`.
 
 export default async function summarizeTerrainProgram(
   bot,
@@ -158,7 +157,7 @@ export default async function summarizeTerrainProgram(
 ) {
   if (args.length && args.length !== 6)
     throw new Error(
-      `Usage: mf run "$MF_TOOLKIT_ROOT/examples/summarize-terrain.mjs" [minX minY minZ maxX maxY maxZ]`,
+      `Usage: node game.mjs query <toolkit>/examples/summarize-terrain.mjs [minX minY minZ maxX maxY maxZ]`,
     );
   const position = bot.entity.position;
   const [x, y, z, maxX, maxY, maxZ] = args.map(Number);

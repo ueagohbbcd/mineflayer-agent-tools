@@ -1,8 +1,8 @@
 # Mineflayer Agent Tools
 
 Reusable Mineflayer agent utilities: on-demand perception queries, optional
-historical chunk memory, visual inspection, generic watchdogs, and `mf`, a
-shell runtime that lets an agent run programs on a real, always-connected bot.
+historical chunk memory, visual inspection, generic watchdogs, and `game/`:
+one Node process that holds a real bot, which an agent drives from a shell.
 
 Repository: `ueagohbbcd/mineflayer-agent-tools` (formerly
 `mineflayer-world-memory`; GitHub redirects the old address). The package and
@@ -24,16 +24,13 @@ operate without any history collection.
 
 See [project scope](docs/project-scope.md).
 
-To let an agent play Minecraft through Mineflayer, give it the skills in
-[`skills/`](skills/): [`mf-basics`](skills/mf-basics/SKILL.md) first (running
-the character and programs with `mf`, the log, the work loop, the examples),
-and the peer `mineflayer-*` skills for writing programs and setup, moving,
-looking, items and survival. To give it one skill instead, use the bundle
-[`bundle/mineflayer-agent`](bundle/mineflayer-agent/SKILL.md), built from the
-same files (`npm run build:bundle`). It runs
-programs with `mf` ([runtime/README.md](runtime/README.md)): `mf start`, then
-`mf run program.mjs` runs a program on the character (in the background of
-your own tool for long ones) and `mf log` shows what happened in the game.
+To let an agent play through Mineflayer, start from [`game/`](game/README.md):
+copy `game/template/` into a project, run `node main.mjs` in the background
+(it holds the bot), and drive it with `node game.mjs task|query|cancel|status|stop`,
+`node wait.mjs` (blocks until there is a notice, then exits: keep one running
+before ending a turn) and `node report.mjs` (what the observers recorded).
+The skills in [`skills/`](skills/) still describe the old `mf` runtime and are
+being rewritten for `game/`.
 Node 22 or newer.
 
 ## Optional historical world memory
@@ -170,7 +167,7 @@ services should serialize it or wrap getters rather than expose mutation.
 
 ## Example programs
 
-`examples/*.mjs` are short `mf` modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`mf run "$MF_TOOLKIT_ROOT/examples/navigate.mjs" X Y Z`) or copy and change them. The list is in [`mf-basics`](skills/mf-basics/SKILL.md#example-programs); each `mineflayer-*` skill links the ones on its subject. They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
+`examples/*.mjs` are short modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`node game.mjs task <toolkit>/examples/navigate.mjs X Y Z`; read-only ones with `node game.mjs query`), import them from their own tasks, or copy and change them. They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
 
 ## Tests
 

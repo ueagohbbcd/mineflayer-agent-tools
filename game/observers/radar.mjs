@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: MIT
+// Radar observer: who and what is around the character, into
+// records/radar.jsonl. Never notifies.
+//
+// - appeared / left: a player (within 64 blocks; through walls while its
+//   name tag shows), a named entity, with team and relation for players;
+// - player: where a player in range is, to the nearest `step` blocks
+//   (default 8), newest only;
+// - mobs: other entities within 48 blocks that you can see, counted by name,
+//   with the nearest distance to the nearest `step` blocks, newest only;
+// - drops: item drops in range, grouped, newest only.
+//
+// `node report.mjs radar` shows what came and went and the latest state.
+import { sampleRadar } from "../observation/snapshot.mjs";
+import { createPendingWrites } from "./support.mjs";
+
+const round = (value, step) => (step > 0 ? Math.round(value / step) * step : Math.round(value));
+const at = (p, step) => p && [round(p.x, step), round(p.y, step), round(p.z, step)];
+
+/** What the radar logs, in a form that changes only when something moved a step. */
+export function radarState(radar, { step = 8 } = {}) {
+  const players = Object.fromEntries(
+    (radar?.players ?? []).map((p) => [
+      p.username ?? p.name,
+      {
+        at: at(p.position, step),
+        ...(p.team ? { team: p.team } : {}),
+        ...(p.relation ? { relation: p.relation } : {}),
+        ...(p.visibility ? { visibility: p.visibility } : {}),
+      },
+    ]),
+  );
+  const named = Object.fromEntries(
+    (radar?.named ?? []).map((e) => [e.customName ?? e.name, { name: e.name, at: at(e.position, step) }]),
+  );
+  const mobs = {};
+  if (Array.isArray(radar?.entities)) {
+    for (const entity of radar.entities) {
+      const name = entity.name ?? "unknown";
+      const mob = (mobs[name] ??= { count: 0 });
+      mob.count++;
+      if (Number.isFinite(entity.distance)) {
+        const near = round(entity.distance, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
+    }
+  } else {
+    // Older callers can still pass chunk summaries. A chunk's `nearest` is
+    // only attributable to a species when that chunk contains one species.
+    const ambiguousNearest = new Set();
+    for (const chunk of radar?.entityChunks ?? []) {
+      const species = Object.entries(chunk.counts ?? {}).filter(
+        ([, count]) => Number.isFinite(count) && count > 0,
+      );
+      for (const [name, count] of species) {
+        const mob = (mobs[name] ??= { count: 0 });
+        mob.count += count;
+        if (species.length !== 1 || !Number.isFinite(chunk.nearest)) {
+          ambiguousNearest.add(name);
+          continue;
+        }
+        const near = round(chunk.nearest, step);
+        mob.nearest = Math.min(mob.nearest ?? Infinity, near);
+      }
+    }
+    for (const name of ambiguousNearest) delete mobs[name].nearest;
+  }
+  const drops = (radar?.drops ?? []).map((d) => ({ at: at(d.center, step), items: d.items }));
+  return { players, named, mobs, drops };
+}
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Watch one bot; returns { close(), flush() }. */
+export function startRadar({
+  bot,
+  log,
+  sampleMs = 2000,
+  step = 8,
+  options = {},
+  sample = (bot, options) => ({ radar: sampleRadar(bot, options) }),
+}) {
+  const writes = createPendingWrites((error) =>
+    console.error(`radar: log failed: ${error.message}`),
+  );
+  const write = (data, opts) => writes.track(() => log.post(data, opts));
+  let last = { players: {}, named: {}, mobs: {}, drops: [] };
+  const timer = setInterval(() => {
+    let state;
+    try {
+      const sampled = sample(bot, {
+        ...options,
+        local: false,
+        radar: { ...options.radar, entities: "list" },
+      });
+      if (!sampled?.radar || sampled.radar.known === false) return;
+      state = radarState(sampled.radar, { step });
+    } catch {
+      return;
+    }
+    for (const kind of ["players", "named"]) {
+      for (const [name, value] of Object.entries(state[kind]))
+        if (!last[kind][name]) write({ name, ...value }, { type: `appeared` });
+        else if (kind === "players" && !same(last[kind][name], value))
+          write({ name, ...value }, { type: "player", key: `player:${name}` });
+      for (const name of Object.keys(last[kind]))
+        if (!state[kind][name]) write({ name }, { type: "left" });
+    }
+    if (!same(last.mobs, state.mobs)) write(state.mobs, { type: "mobs", key: "mobs" });
+    if (!same(last.drops, state.drops)) write(state.drops, { type: "drops", key: "drops" });
+    last = state;
+  }, sampleMs);
+  return {
+    flush: writes.flush,
+    close: () => clearInterval(timer),
+  };
+}
