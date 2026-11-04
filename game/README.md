@@ -15,6 +15,7 @@
 | `lib/notify.mjs`、`bin/wait.mjs` | notifyModel 追加 `.game/notices.jsonl`；`wait` 打印未送达的通知后退出，只有它标记已送达 |
 | `observation/` | 只读观察函数（快照、雷达、事件、开阔空间扫描、字符地图 reachMap、地点图），原 `runtime/observation/` |
 | `observers/`、`bin/report.mjs` | chat、danger、explore、radar 观察器写 `records/<名称>.jsonl`；danger 的 urgent 条目和 MF_CHAT_WAKE 匹配的聊天也会通知。`node report.mjs [名称] [分钟]` 只读文件，不改任何状态 |
+| `visual/`、`examples/screenshot.mjs`、`examples/pick.mjs` | 截图渲染器（从 arena 搬来：盒选、剖切、多视角、网格、实体图例、headless-gl），`pick` 把像素换成方块坐标。见 [visual/README.md](visual/README.md) |
 | `queries/snapshot.mjs` | 一次完整状态采样（原 `mf snapshot`） |
 | `dev/` | 本地验证：RCON、水道场地、测试任务和查询、模拟 harness 及场景 |
 

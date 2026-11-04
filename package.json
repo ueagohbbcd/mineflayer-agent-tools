@@ -18,7 +18,8 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.js\" \"test/**/*.test.mjs\"",
     "build:bundle": "node scripts/build-bundle.mjs",
-    "test:visual": "python3 -m unittest discover -s test -p \"visual_*_test.py\""
+    "test:visual": "python3 -m unittest discover -s test -p \"visual_*_test.py\"",
+    "demo:screenshot": "node game/dev/render-fixture.mjs"
   },
   "dependencies": {
     "prismarine-chunk": "^1.41.0",
@@ -71,5 +72,10 @@
     "prismarine-viewer": {
       "optional": true
     }
+  },
+  "optionalDependencies": {
+    "canvas": "3.2.3",
+    "gl": "9.0.0-rc.10",
+    "prismarine-viewer": "1.33.0"
   }
 }
