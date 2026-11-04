@@ -61,6 +61,8 @@
     "watchdog.js",
     "watchdog.mjs",
     "runtime/**/*.mjs",
+    "game/**/*.mjs",
+    "game/**/*.md",
     "runtime/**/*.md"
   ],
   "devDependencies": {
