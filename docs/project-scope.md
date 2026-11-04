@@ -60,13 +60,13 @@ later, separate breaking change.
 
 - This repository ships libraries, small proven tools, prompts and guides. The
   guides are a set of skills in [`skills/`](../skills/) to drop into any agent
-  together: [`mf-basics`](../skills/mf-basics/SKILL.md) is the top one (running
-  the character and programs with `mf`, the log, the work loop, the examples)
-  and the peer `mineflayer-*` skills each cover one subject (programs and
-  setup without `mf`, navigation, surroundings, items, survival). Background
-  modules get a line in `mf-basics` and in the skill of their subject.
+  together: [`mineflayer-game`](../skills/mineflayer-game/SKILL.md) is the top
+  one (the game process, tasks and queries, `wait`, looking at the world, the
+  examples) and the peer `mineflayer-*` skills each cover one subject (tasks
+  and setup without the game process, navigation, surroundings, items,
+  survival).
 - One bundle skill, [`bundle/mineflayer-agent`](../bundle/mineflayer-agent/SKILL.md),
-  holds all of them for an agent that should get only one: `mf-basics` is its
+  holds all of them for an agent that should get only one: `mineflayer-game` is its
   SKILL.md, the others are its references, and each skill's `intro.md` is its
   paragraph there. `scripts/build-bundle.mjs` (`npm run build:bundle`) writes
   it and a test checks it matches. Take either the bundle or the separate

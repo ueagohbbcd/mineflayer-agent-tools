@@ -1,6 +1,6 @@
 # Developer guide
 
-For contributors to this repository. Agents that play through it start from `game/README.md` and `game/template/` (the skills under `skills/` still describe the removed `mf` runtime and are being rewritten). After changing a skill, run `npm run build:bundle`.
+For contributors to this repository. Agents that play through it read `skills/mineflayer-game/SKILL.md` (then the `mineflayer-*` skills it lists), or the bundle `bundle/mineflayer-agent/SKILL.md`. After changing a skill, run `npm run build:bundle`.
 
 ## Two layers
 
