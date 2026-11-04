@@ -1,19 +1,21 @@
 // The game process. It holds the bot for as long as it runs; edit it freely
 // and restart it to apply changes (reconnecting is fine).
 //
-//   node main.mjs [task.mjs ...]     run the given tasks in order, then idle
+//   node main.mjs        start in the background, then use game.mjs:
+//                        task <file> / query <file> / cancel / status / stop
 //
 // Env: MF_HOST (localhost) MF_PORT (25565) MF_USERNAME (Bot) MF_VERSION
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pathfinderPkg from 'mineflayer-pathfinder'
-import { createGame, lowAir, noProgress, repeatDeath, repeatNoPath } from 'mineflayer-world-memory/game/index.mjs'
+import { createGame, serve, takeLock, lowAir, noProgress, repeatDeath, repeatNoPath } from 'mineflayer-world-memory/game/index.mjs'
 
 const { pathfinder, Movements } = pathfinderPkg
 const dir = path.dirname(fileURLToPath(import.meta.url))
 
 // ---- init -----------------------------------------------------------------
+takeLock(dir) // before connecting: a second main for this project exits here
 const bot = mineflayer.createBot({
   host: process.env.MF_HOST ?? 'localhost',
   port: Number(process.env.MF_PORT ?? 25565),
@@ -52,9 +54,4 @@ await new Promise(resolve => bot.once('spawn', resolve))
 const game = createGame(bot, { dir, rules, idle })
 console.log(`已进入游戏：${bot.username} @ ${bot.entity.position}`)
 
-const gapMs = Number(process.env.GAME_TASK_GAP_MS ?? 0) // pause between argv tasks (idle runs)
-for (const file of process.argv.slice(2)) {
-  const summary = await game.runTask(file)
-  console.log(JSON.stringify(summary))
-  if (gapMs) await new Promise(resolve => setTimeout(resolve, gapMs))
-}
+await serve(game) // lock + local socket; one main per project
