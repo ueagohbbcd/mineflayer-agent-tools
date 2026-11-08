@@ -25,7 +25,7 @@ const radarDefaults = Object.freeze({
 // Mineflayer sets bot.oxygenLevel from the air supply of any entity whose
 // metadata arrives (a dolphin nearby makes it tick down on land), so read the
 // player's own air supply. The server sends it only once it is below full.
-function oxygenOf(bot) {
+export function oxygenOf(bot) {
   const keys = bot?.registry?.entitiesByName?.player?.metadataKeys;
   const index = Array.isArray(keys) ? keys.indexOf("air_supply") : -1;
   const air = index >= 0 ? bot?.entity?.metadata?.[index] : undefined;

@@ -2,7 +2,7 @@
  * Watch loaded blocks near the character until one of a kind shows up, then
  * end with what was found:
  *
- *   node game.mjs task <toolkit>/examples/watch-surroundings.mjs [block=chest] [seconds=600]
+ *   node game.mjs run <toolkit>/examples/watch-surroundings.mjs [block=chest] [seconds=600]
  *
  * Read-only, so it runs beside the controlling program. Start it in the
  * background: its end is what tells you something was found.

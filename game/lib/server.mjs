@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 // The local entry of a running main: a single-instance lock and a Unix
-// socket that takes one JSON request per connection.
+// socket that takes one JSON request per connection; replies are JSON lines.
 //
-//   { type: 'task', file }     run a task; the reply comes when it ends. If the
-//                              caller disconnects first, the task goes on and
-//                              its result is sent with notifyModel instead
-//   { type: 'query', file, timeoutMs }   run a read-only module now
-//   { type: 'cancel', graceMs }          ask the task to stop
+//   { type: 'run', file, args }   submit work; streams { type: 'log' | 'event' }
+//                                 lines and ends with { type: 'result' }. The
+//                                 caller disconnecting only stops the stream
+//   { type: 'cancel' }            cancel the current work (exit flow, no restart)
+//   { type: 'wait' }              reply with the report once something is pending
+//   { type: 'query', file, args, timeoutMs }   run a read-only module now
 //   { type: 'status' }
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -58,13 +59,14 @@ export function takeLock (dir) {
   process.on('exit', release)
 }
 
-export async function serve (game, { blockedMs = 5000 } = {}) {
-  const { dir, bot } = game
+export async function serve (host, { blockedMs = 5000 } = {}) {
+  const { dir, bot } = host
   takeLock(dir)
   const sock = socketPath(dir)
   fs.rmSync(sock, { force: true })
+  fs.rmSync(blockedFile(dir), { force: true })
   const blockedModule = fileURLToPath(new URL('./blocked-notice.mjs', import.meta.url))
-  watchdog(bot, { report: () => {}, stuckMs: Infinity, repeatCount: Infinity, blockedMs, onBlocked: blockedModule, blockedContext: { dir } })
+  watchdog(bot, { report: () => {}, stuckMs: Infinity, repeatCount: Infinity, blockedMs, onBlocked: blockedModule, blockedContext: { file: blockedFile(dir) } })
 
   const server = net.createServer(conn => {
     let buffer = ''
@@ -80,9 +82,9 @@ export async function serve (game, { blockedMs = 5000 } = {}) {
       try {
         request = JSON.parse(line)
       } catch {
-        return reply(conn, { ok: false, error: 'bad request' })
+        return end(conn, { type: 'error', error: 'bad request' })
       }
-      handle(game, request, conn).catch(error => reply(conn, { ok: false, error: error?.message ?? String(error) }))
+      handle(host, request, conn).catch(error => end(conn, { type: 'error', error: error?.message ?? String(error) }))
     })
   })
   await new Promise((resolve, reject) => {
@@ -99,25 +101,47 @@ export async function serve (game, { blockedMs = 5000 } = {}) {
   return server
 }
 
-async function handle (game, request, conn) {
+export function blockedFile (dir) {
+  return path.join(gameDir(dir), 'blocked.json')
+}
+
+async function handle (host, request, conn) {
   switch (request.type) {
-    case 'task': {
-      let attached = true
-      conn.on('close', () => { attached = false })
-      const summary = await game.runTask(request.file, { notifyResult: () => !attached, args: request.args ?? [] })
-      return reply(conn, summary)
+    case 'run': {
+      let open = true
+      const sink = msg => {
+        if (!open) return
+        send(conn, msg)
+        if (msg.type === 'result') { open = false; conn.end() }
+      }
+      conn.on('close', () => { open = false; host.work?.sinks?.delete(sink) })
+      const out = await host.submit(request.file, { args: request.args ?? [], sink })
+      if (!out.ok) return end(conn, { type: 'error', error: out.error })
+      return send(conn, { type: 'started', id: out.id })
+    }
+    case 'cancel':
+      return end(conn, { type: 'cancel', ...(await host.cancel(request.reason)) })
+    case 'wait': {
+      const left = new AbortController()
+      conn.on('close', () => left.abort())
+      const report = await host.waitForReport(left.signal)
+      if (report === null) return // the waiter left; nothing was consumed
+      if (conn.destroyed) return host.wake('上一次 wait 在报告送达前断开')
+      return end(conn, { type: 'report', text: report })
     }
     case 'query':
-      return reply(conn, await game.runQuery(request.file, { timeoutMs: request.timeoutMs, args: request.args ?? [] }))
-    case 'cancel':
-      return reply(conn, await game.cancel({ graceMs: request.graceMs }))
+      return end(conn, { type: 'query', ...(await host.query(request.file, { args: request.args ?? [], timeoutMs: request.timeoutMs })) })
     case 'status':
-      return reply(conn, { ok: true, ...game.status() })
+      return end(conn, { type: 'status', ...host.status() })
     default:
-      return reply(conn, { ok: false, error: `unknown request type ${request.type}` })
+      return end(conn, { type: 'error', error: `unknown request type ${request.type}` })
   }
 }
 
-function reply (conn, value) {
+function send (conn, value) {
+  if (!conn.destroyed) conn.write(JSON.stringify(value) + '\n')
+}
+
+function end (conn, value) {
   if (!conn.destroyed) conn.end(JSON.stringify(value) + '\n')
 }

@@ -26,9 +26,9 @@ See [project scope](docs/project-scope.md).
 
 To let an agent play through Mineflayer, start from [`game/`](game/README.md):
 copy `game/template/` into a project, run `node main.mjs` in the background
-(it holds the bot), and drive it with `node game.mjs task|query|cancel|status|stop`,
-`node wait.mjs` (blocks until there is a notice, then exits: keep one running
-before ending a turn) and `node report.mjs` (what the observers recorded).
+(it holds the bot), and drive it with `node game.mjs run|wait|cancel|query|status|stop`
+(`run` follows a piece of work to its end; `wait` returns with a report once
+something happened) and `node report.mjs` (what the recorders kept).
 Give the agent the skills in [`skills/`](skills/): [`mineflayer-game`](skills/mineflayer-game/SKILL.md)
 first, and the peer `mineflayer-*` skills for writing tasks, moving, looking,
 items and survival; or the one-skill bundle

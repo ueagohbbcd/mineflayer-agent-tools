@@ -2,7 +2,7 @@
 // and restart it to apply changes (reconnecting is fine).
 //
 //   node main.mjs        start in the background, then use game.mjs:
-//                        task <file> / query <file> / cancel / status / stop
+//                        run <file> / wait / cancel / query <file> / status / stop
 //
 // Env: MF_HOST (localhost) MF_PORT (25565) MF_USERNAME (Bot) MF_VERSION
 // (empty = ask the server; give it for 1.21.1 to get the recipe-packet fix)
@@ -10,12 +10,18 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pathfinderPkg from 'mineflayer-pathfinder'
-import { createGame, serve, takeLock, startObservers, compatibleMinecraftOptions, lowAir, noProgress, repeatDeath, repeatNoPath } from 'mineflayer-world-memory/game/index.mjs'
+import {
+  createHost, serve, takeLock, compatibleMinecraftOptions, fixCrafting, walkingMovements,
+  watchDamage, watchChat, statusReport, radarReport, recordLog, startExplore, startRadar
+} from 'mineflayer-world-memory/game/index.mjs'
+// Candidates: control logic still being tried out (game/candidates/README.md).
+import { defend, escape, eat } from 'mineflayer-world-memory/game/candidates/services.mjs'
+import { idle } from 'mineflayer-world-memory/game/candidates/idle.mjs'
+import { dangerTakeover } from 'mineflayer-world-memory/game/candidates/danger-takeover.mjs'
 
-const { pathfinder, Movements } = pathfinderPkg
 const dir = path.dirname(fileURLToPath(import.meta.url))
 
-// ---- init -----------------------------------------------------------------
+// ---- connect ------------------------------------------------------------------
 takeLock(dir) // before connecting: a second main for this project exits here
 const bot = mineflayer.createBot(compatibleMinecraftOptions({
   host: process.env.MF_HOST ?? 'localhost',
@@ -23,40 +29,36 @@ const bot = mineflayer.createBot(compatibleMinecraftOptions({
   username: process.env.MF_USERNAME ?? 'Bot',
   version: process.env.MF_VERSION || undefined
 }))
-bot.loadPlugin(pathfinder)
-bot.once('spawn', () => bot.pathfinder.setMovements(new Movements(bot)))
+const damage = watchDamage(bot) // right after createBot: damage type names arrive before spawn
+fixCrafting(bot) // bot.craft clears the grid after itself (1.21.1 leftovers)
+bot.loadPlugin(pathfinderPkg.pathfinder)
+bot.on('spawn', () => bot.pathfinder.setMovements(walkingMovements(bot))) // walk only: no digging, no towering
 bot.on('kicked', reason => console.log('被踢出：', reason))
 bot.on('end', reason => {
   console.log('连接已断开：', reason)
   process.exit(1)
 })
 bot.on('error', error => console.log('连接错误：', error.message))
-
-// ---- rules: checked every tick, in order ------------------------------------
-// In steps the first rule returning inputs takes the tick; during plugin or
-// native code rules only notify; between tasks rule inputs keep the bot safe.
-// A task can turn off a rule's inputs with ctx.rules.disable(name).
-const rules = [
-  lowAir(), // air low → hold jump until recovered; notifies only when nearly out
-  noProgress(), // movement keys held 10 s, position barely changes → notice
-  repeatDeath(), // died again near the last death → notice
-  repeatNoPath() // pathfinder keeps finding no path → notice
-]
-
-// ---- idle: between tasks, when no rule is taking over -------------------------
-// Return inputs like a step does. In water, float; otherwise stand still.
-function idle (bot) {
-  if (bot.entity.isInWater) return { jump: true }
-  return null
-}
-
-// ---- run ----------------------------------------------------------------------
 await new Promise(resolve => bot.once('spawn', resolve))
-const game = createGame(bot, { dir, rules, idle })
 console.log(`已进入游戏：${bot.username} @ ${bot.entity.position}`)
 
-// Observers write records/<name>.jsonl (node report.mjs reads them); urgent
-// danger entries and chat matching MF_CHAT_WAKE also notify.
-startObservers(game, ['chat', 'danger', 'explore', 'radar'])
+// ---- host: tasks, services, idle ------------------------------------------------
+// Services can be named in a task's ctx.checkpoint({ eat: 'pause' }) or taken
+// over with host.takeover(name). idle runs when there is no work.
+const host = createHost(bot, { dir, services: { defend, escape, eat }, idle })
 
-await serve(game) // lock + local socket; one main per project
+// Report functions: their output is joined into what `game.mjs wait` prints.
+host.addReport('状态', statusReport(bot))
+host.addReport('周围', radarReport(bot))
+host.addReport('受伤', () => damage.report())
+const chat = watchChat(bot, { wake: host.wake })
+host.addReport('聊天', () => chat.report())
+
+// Being hurt badly by a mob, or suffocating: stop the work and defend.
+dangerTakeover(bot, host, damage)
+
+// Records for `node report.mjs` (what was seen, who was around).
+startExplore({ bot, log: recordLog(dir, 'explore') })
+startRadar({ bot, log: recordLog(dir, 'radar') })
+
+await serve(host) // local socket; one main per project

@@ -7,7 +7,7 @@ The game does not wait for you. With no program running the character stands sti
 - **Eat:** `await bot.consume()` with food equipped; it returns after eating. Eat when `bot.food` drops, not only when health is low. `mineflayer-auto-eat` can do this beside a controller, but it takes the main hand.
 - **Fight:** with `mineflayer-pvp`, `await bot.pvp.attack(entity)` and `await bot.pvp.stop()`. PvP gives Pathfinder its own settings, `bot.pvp.movements`; set `bot.pvp.movements.canDig = false` to keep it from digging during a fight even when your own Movements forbid digging.
 - **Defend while walking:** watch `entityHurt` for yourself or hostile mobs within a few blocks, stop the walk (see "Stopping Pathfinder" in [mineflayer-navigation](mineflayer-navigation.md)), fight, then set the goal again.
-- **Water:** in water get to air first: hold `jump` (`bot.setControlState("jump", true)`) until the head is out, watch `bot.oxygenLevel`.
+- **Water:** in water get to air first: hold `jump` (`bot.setControlState("jump", true)`) until the head is out, watch the air with `oxygenOf(bot)` from `mineflayer-world-memory/game/index.mjs` (`bot.oxygenLevel` can be another entity's air).
 - **Falls and lava:** check the block below and ahead before stepping or digging down.
 
 ## Respawn point
@@ -17,7 +17,7 @@ Right-click a bed with `await bot.activateBlock(bedBlock)` from within about two
 ## In the game process
 
 - The `danger` observer records damage, risks near you (a swelling creeper, lit TNT, a projectile, something targeting you), hunger and air (`node report.mjs danger`); the serious ones also come to you as notices.
-- main's rules swim up when air runs low (inside `steps` and between tasks) and notify when that is not enough. While a plugin or your own code drives the character, keeping it alive is that code's job; rules only notify. Between tasks, main's `idle` holds the character (by default: float in water); edit it in `main.mjs` to eat or defend.
+- During a task, keeping the character alive is the task's job, plus whatever main does: in the template, a checkpoint (`ctx.checkpoint({ eat: 'pause' })`) lets main eat and restart the task, and a hostile mob hurting you below 12 health or your head stuck in a block makes main take over and end the work. Between tasks, main's idle fights back, gets out of blocks, stays at the water surface and eats.
 
 ## Examples
 

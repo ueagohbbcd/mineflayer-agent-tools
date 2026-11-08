@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Danger observer: what threatens the character, into records/danger.jsonl.
-// Entries marked urgent (below) are also sent with notifyModel.
+// Candidate material (not a routine): the old danger observer. Detects risk
+// signs (lit TNT, swelling creeper, moving projectile, a mob targeting you,
+// big or repeated health loss) and posts them through a `log` such as
+// observers/record.mjs. Kept for its detection logic.
 //
 // - health_loss (urgent for a large or repeated loss), hurt, critical_health
 //   (urgent) from the game's own health and hurt events;
@@ -12,7 +14,7 @@
 //   the low-air rule in main handles air and notifies when it is not enough.
 import { watchObservation } from "../observation/events.mjs";
 import { minimalDangerSample } from "../observation/snapshot.mjs";
-import { createPendingWrites } from "./support.mjs";
+import { createPendingWrites } from "../observers/support.mjs";
 
 const KEEP = new Set(["health_loss", "hurt", "critical_health"]);
 const STAMP = ["observedAt", "sampledAt", "epoch", "sequence"];

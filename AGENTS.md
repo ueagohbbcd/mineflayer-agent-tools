@@ -5,7 +5,8 @@ For contributors to this repository. Agents that play through it read `skills/mi
 ## Two layers
 
 - **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `game/`, never notify a model, and take a callback for anything they report.
-- **Game** (`game/`): one process that holds the bot (`template/main.mjs`), tasks and read-only queries through a local socket, one rule table for the prebuilt loop / watchdog / idle, observers writing `records/`, `notifyModel` + `wait`. Telling a model when a background command ends is the harness's job; `wait` exiting is how a notice reaches it.
+- **Game** (`game/`): one process that holds the bot (`template/main.mjs`). The core (`lib/host.mjs`, `lib/server.mjs`) is kept small: run task files, hand control between task, service and idle through one exit flow, a Unix socket for run/cancel/wait/query/status, a wake flag, and report functions joined when `wait` returns. Telling a model when a background command ends is the harness's job.
+- **Candidates** (`game/candidates/`): control logic found useful in tests or play (services, idle, danger takeover, `goto`, `craftChecked`). It stays there, marked in its README with what was checked on a server, until it has earned a place as a routine. Lessons for playing go into skills more freely.
 
 Example programs (`examples/*.mjs`) sit on top of both: short task/query modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique; two examples that do similar things in different ways stay separate. Their tests are in `test/examples/`.
 
@@ -22,4 +23,4 @@ npm test              # unit and fixture tests (Node 22+)
 npm run test:visual   # renderer tests (Python, renderers/requirements.txt)
 ```
 
-Game behaviour that unit tests cannot show (joining, deaths, real chat events) needs a local Minecraft 1.21.1 server (`game/dev/`: course setup and a harness simulator); say so when it was not run instead of writing a test that pretends to cover it.
+Game behaviour that unit tests cannot show (joining, deaths, real chat events) needs a local Minecraft 1.21.1 server (`game/dev/`: RCON, course setup, test tasks); say so when it was not run instead of writing a test that pretends to cover it.
