@@ -13,7 +13,7 @@ You control a character through [Mineflayer](https://github.com/PrismarineJS/min
 
 ## Setup
 
-- Copy `<toolkit>/game/template/` into a project directory and install the toolkit there (`npm install <toolkit tarball> mineflayer mineflayer-pathfinder vec3`). `<toolkit>` below means `node_modules/mineflayer-world-memory`.
+- Copy `<toolkit>/game/template/` into a project directory and install the toolkit there (`npm install <toolkit tarball> mineflayer mineflayer-pathfinder mineflayer-pvp mineflayer-auto-eat mineflayer-armor-manager mineflayer-tool mineflayer-collectblock vec3`). `<toolkit>` below means `node_modules/mineflayer-world-memory`.
 - Set `MF_HOST`, `MF_PORT`, `MF_USERNAME` (and `MF_VERSION=1.21.1` for 1.21.1), then start `node main.mjs` **with your tool's background mode**. A second `node main.mjs` in the same directory just says one is running.
 - `main.mjs` is yours: which services, idle behaviour and reports it uses are plain code. After editing it, `node game.mjs stop` and start it again (reconnecting is fine).
 
@@ -64,6 +64,7 @@ Results are also in `.game/results/`, records in `records/*.jsonl`.
 
 ## Library and candidates
 
+- Plugins main loads: `mineflayer-pathfinder`, `mineflayer-pvp` (`bot.pvp`), `mineflayer-auto-eat` (`bot.autoEat`, automatic eating off), `mineflayer-armor-manager`, `mineflayer-tool` (`bot.tool`), `mineflayer-collectblock` (`bot.collectBlock`). Use them in tasks instead of writing your own fighting, eating or collecting. Pathfinder walks without digging by default; a task that needs digging sets its own movements, and they go back to walking-only when it leaves.
 - `<toolkit>/game/index.mjs`: what main is built from (host, reports, damage types, chat, walking-only Pathfinder movements, the crafting fix, `oxygenOf(bot)`).
 - `<toolkit>/game/candidates/`: control logic that is still being tried (services, idle, danger takeover, `goto`, `craftChecked`). Use it, copy it, change it; its README says what has been checked on a server.
 

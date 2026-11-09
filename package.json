@@ -22,19 +22,23 @@
     "demo:screenshot": "node game/dev/render-fixture.mjs"
   },
   "dependencies": {
+    "prismarine-block": "^1.23.0",
     "prismarine-chunk": "^1.41.0",
     "prismarine-registry": "^1.1.0",
-    "prismarine-block": "^1.23.0",
     "proper-lockfile": "^4.1.2",
     "vec3": "^0.2.0"
   },
   "peerDependencies": {
-    "mineflayer": ">=4.39.0 <5",
-    "prismarine-viewer": "^1.33.0",
-    "mineflayer-pathfinder": "^2.4.5",
-    "prismarine-item": "^1.17.0",
     "minecraft-data": "^3.114.0",
-    "mineflayer-pvp": "^1.3.2"
+    "mineflayer": ">=4.39.0 <5",
+    "mineflayer-pathfinder": "^2.4.5",
+    "mineflayer-pvp": "^1.3.2",
+    "prismarine-item": "^1.17.0",
+    "prismarine-viewer": "^1.33.0",
+    "mineflayer-auto-eat": "^5.0.3",
+    "mineflayer-armor-manager": "^2.0.1",
+    "mineflayer-tool": "^1.2.0",
+    "mineflayer-collectblock": "^1.6.0"
   },
   "bin": {
     "world-memory": "bin/world-memory.js"
@@ -65,11 +69,30 @@
   ],
   "devDependencies": {
     "mineflayer": "4.39.0",
+    "mineflayer-armor-manager": "2.0.1",
+    "mineflayer-auto-eat": "5.0.3",
+    "mineflayer-collectblock": "1.6.0",
     "mineflayer-pathfinder": "2.4.5",
-    "mineflayer-pvp": "1.3.2"
+    "mineflayer-pvp": "1.3.2",
+    "mineflayer-tool": "1.2.0"
   },
   "peerDependenciesMeta": {
     "prismarine-viewer": {
+      "optional": true
+    },
+    "mineflayer-auto-eat": {
+      "optional": true
+    },
+    "mineflayer-armor-manager": {
+      "optional": true
+    },
+    "mineflayer-tool": {
+      "optional": true
+    },
+    "mineflayer-collectblock": {
+      "optional": true
+    },
+    "mineflayer-pvp": {
       "optional": true
     }
   },

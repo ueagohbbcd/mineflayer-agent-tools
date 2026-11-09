@@ -4,6 +4,8 @@
 export function stopGameActions (bot) {
   try { bot.pathfinder?.setGoal(null) } catch {}
   try { bot.pvp?.forceStop?.() } catch {}
+  try { bot.collectBlock?.cancelTask?.().catch(() => {}) } catch {}
+  try { bot.autoEat?.cancelEat?.() } catch {}
   try { bot.clearControlStates?.() } catch {}
   try { if (bot.targetDigBlock) bot.stopDigging() } catch {}
   try { bot.deactivateItem?.() } catch {}

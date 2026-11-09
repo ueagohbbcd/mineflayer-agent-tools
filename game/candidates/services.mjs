@@ -21,7 +21,7 @@ export function nearestHostile (bot, range = 16) {
   return best
 }
 
-/** Fight back while health allows, otherwise run; ends when nothing is near. */
+/** Fight back with mineflayer-pvp while health allows, otherwise run; ends when nothing is near. */
 export const defend = {
   check: bot => {
     const h = nearestHostile(bot, 6)
@@ -30,30 +30,36 @@ export const defend = {
   async run (bot, { signal }) {
     const started = Date.now()
     let calm = 0
-    let fought = 0
-    while (Date.now() - started < 30000) {
-      signal.throwIfAborted()
-      const h = nearestHostile(bot, 12)
-      if (!h) {
-        if (++calm >= 6) return `周围安全（还手 ${fought} 次）`
+    let target = null
+    try {
+      while (Date.now() - started < 30000) {
+        signal.throwIfAborted()
+        const h = nearestHostile(bot, 12)
+        if (!h) {
+          if (target) { bot.pvp.forceStop(); target = null }
+          if (++calm >= 6) return '周围安全'
+          await sleep(500, signal)
+          continue
+        }
+        calm = 0
+        if (bot.health > 6) {
+          if (target !== h.e) {
+            await equipWeapon(bot)
+            target = h.e
+            bot.pvp.attack(h.e) // follows and swings until the target dies or stop
+          }
+        } else {
+          if (target) { bot.pvp.forceStop(); target = null }
+          // Run directly away for a few blocks.
+          const away = bot.entity.position.minus(h.e.position).normalize().scaled(8).plus(bot.entity.position)
+          bot.pathfinder.setGoal(new goals.GoalNear(away.x, away.y, away.z, 2))
+        }
         await sleep(500, signal)
-        continue
       }
-      calm = 0
-      if (bot.health > 6 && h.d < 4) {
-        await equipWeapon(bot)
-        await bot.lookAt(h.e.position.offset(0, h.e.height * 0.8, 0))
-        bot.attack(h.e)
-        fought++
-        await sleep(650, signal)
-      } else {
-        // Run directly away for a few blocks.
-        const away = bot.entity.position.minus(h.e.position).normalize().scaled(8).plus(bot.entity.position)
-        bot.pathfinder.setGoal(new goals.GoalNear(away.x, away.y, away.z, 2))
-        await sleep(1500, signal)
-      }
+      return `30 秒后仍有 ${nearestHostile(bot, 12)?.e.name ?? '威胁'}，交回`
+    } finally {
+      bot.pvp.forceStop()
     }
-    return `30 秒后仍有 ${nearestHostile(bot, 12)?.e.name ?? '威胁'}，交回`
   }
 }
 
@@ -76,6 +82,7 @@ export const escape = {
       signal.throwIfAborted()
       const head = bot.blockAt(bot.entity.position.offset(0, 1.6, 0))
       if (head && bot.canDigBlock(head)) {
+        await bot.tool?.equipForBlock(head, {}).catch(() => {})
         await bot.dig(head)
       } else {
         bot.setControlState('back', true)
@@ -92,36 +99,25 @@ export function headBlocked (bot) {
   return Boolean(head && head.boundingBox === 'block')
 }
 
-const FOODS = new Set(['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon', 'bread', 'baked_potato', 'carrot', 'apple', 'golden_carrot', 'beef', 'porkchop', 'mutton', 'chicken', 'rabbit', 'cod', 'salmon', 'potato', 'melon_slice', 'sweet_berries', 'cookie', 'pumpkin_pie', 'rabbit_stew', 'mushroom_stew', 'beetroot', 'beetroot_soup', 'dried_kelp'])
-
+/** Something worth eating, by mineflayer-auto-eat's food list and its banned foods. */
 export function foodItem (bot) {
-  return bot.inventory.items().find(i => FOODS.has(i.name))
-}
-
-/** Eat one item; waits for the food bar to change before returning. */
-export async function eatOnce (bot, signal) {
-  const item = foodItem(bot)
-  if (!item) return 'no food'
-  const before = bot.food
-  const held = bot.heldItem?.name
-  await bot.equip(item, 'hand')
-  await bot.consume()
-  for (let i = 0; i < 20 && bot.food === before; i++) await sleep(100, signal)
-  if (held && held !== item.name) {
-    const back = bot.inventory.items().find(i => i.name === held)
-    if (back) await bot.equip(back, 'hand')
-  }
-  return `${item.name}：饥饿 ${before} → ${bot.food}`
+  const ae = bot.autoEat
+  if (!ae) return null
+  return bot.inventory.items().find(i => ae.foodsByName[i.name] && !ae.opts.bannedFood.includes(i.name))
 }
 
 export const eat = {
   check: bot => (bot.food <= 14 && foodItem(bot) ? `饥饿 ${bot.food}` : null),
+  // mineflayer-auto-eat picks the food, equips it and puts the old item back.
   async run (bot, { signal }) {
     const out = []
     while (bot.food < 18 && foodItem(bot)) {
       signal.throwIfAborted()
-      out.push(await eatOnce(bot, signal))
+      const before = bot.food
+      await bot.autoEat.eat()
+      for (let i = 0; i < 20 && bot.food === before; i++) await sleep(100, signal)
+      out.push(`${before} → ${bot.food}`)
     }
-    return out.join('；') || '没吃'
+    return out.length ? `饥饿 ${out.join('，')}` : '没吃'
   }
 }

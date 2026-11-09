@@ -14,7 +14,7 @@
 | `lib/minecraft-compat.mjs` | 1.21.1 配方包解析修正 |
 | `observers/` | 报告函数：`statusReport`（血、饥饿、氧气、时间、位置、装备、背包变化、死亡）、`radarReport`、`watchDamage`（伤害类型）、`watchChat`（私聊和点名会唤醒）；记录器 `explore`、`radar` 写 `records/` |
 | `candidates/` | 候选控制逻辑（服务、idle、主动接管、goto、合成核对），还不是例程，见 [candidates/README.md](candidates/README.md) |
-| `template/` | 玩家项目的起点：`main.mjs`（可编辑）、`game.mjs`、`report.mjs` |
+| `template/` | 玩家项目的起点：`main.mjs`（可编辑；加载 pathfinder、pvp、auto-eat、armor-manager、tool、collectblock，退出时恢复只走路的寻路设置）、`game.mjs`、`report.mjs` |
 | `bin/game.mjs` | `run`、`wait`、`cancel`、`query`、`status`、`stop` |
 | `observation/`、`queries/`、`visual/` | 只读观察函数、快照查询、截图渲染器 |
 | `dev/` | 本地验证：RCON、场地、测试任务 |

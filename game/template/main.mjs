@@ -10,8 +10,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import pathfinderPkg from 'mineflayer-pathfinder'
+// Ecosystem plugins: fighting, eating, armour, picking tools, collecting blocks.
+import pvpPkg from 'mineflayer-pvp'
+import { loader as autoEat } from 'mineflayer-auto-eat'
+import armorManager from 'mineflayer-armor-manager'
+import toolPkg from 'mineflayer-tool'
+import collectBlockPkg from 'mineflayer-collectblock'
 import {
-  createHost, serve, takeLock, compatibleMinecraftOptions, fixCrafting, walkingMovements,
+  createHost, stopGameActions, serve, takeLock, compatibleMinecraftOptions, fixCrafting, walkingMovements,
   watchDamage, watchChat, statusReport, radarReport, recordLog, startExplore, startRadar
 } from 'mineflayer-world-memory/game/index.mjs'
 // Candidates: control logic still being tried out (game/candidates/README.md).
@@ -32,7 +38,21 @@ const bot = mineflayer.createBot(compatibleMinecraftOptions({
 const damage = watchDamage(bot) // right after createBot: damage type names arrive before spawn
 fixCrafting(bot) // bot.craft clears the grid after itself (1.21.1 leftovers)
 bot.loadPlugin(pathfinderPkg.pathfinder)
-bot.on('spawn', () => bot.pathfinder.setMovements(walkingMovements(bot))) // walk only: no digging, no towering
+bot.loadPlugin(pvpPkg.plugin) // bot.pvp.attack(entity), bot.pvp.stop()
+bot.loadPlugin(autoEat) // bot.autoEat.eat(); automatic eating stays off, the eat service decides
+bot.loadPlugin(armorManager) // puts on better armour when it is picked up
+bot.loadPlugin(toolPkg.plugin) // bot.tool.equipForBlock(block)
+bot.loadPlugin(collectBlockPkg.plugin) // bot.collectBlock.collect(block)
+// Walk only (no digging, no towering) by default. pvp and collectblock switch
+// Pathfinder to their own digging movements on each call unless theirs are
+// null. A task that needs digging sets movements itself; every exit (task,
+// service, idle) puts these defaults back.
+function defaultMovements () {
+  bot.pathfinder.setMovements(walkingMovements(bot))
+  bot.pvp.movements = null
+  bot.collectBlock.movements = null
+}
+bot.on('spawn', defaultMovements)
 bot.on('kicked', reason => console.log('被踢出：', reason))
 bot.on('end', reason => {
   console.log('连接已断开：', reason)
@@ -45,7 +65,12 @@ console.log(`已进入游戏：${bot.username} @ ${bot.entity.position}`)
 // ---- host: tasks, services, idle ------------------------------------------------
 // Services can be named in a task's ctx.checkpoint({ eat: 'pause' }) or taken
 // over with host.takeover(name). idle runs when there is no work.
-const host = createHost(bot, { dir, services: { defend, escape, eat }, idle })
+const host = createHost(bot, {
+  dir,
+  services: { defend, escape, eat },
+  idle,
+  cleanup: bot => { stopGameActions(bot); defaultMovements() }
+})
 
 // Report functions: their output is joined into what `game.mjs wait` prints.
 host.addReport('状态', statusReport(bot))

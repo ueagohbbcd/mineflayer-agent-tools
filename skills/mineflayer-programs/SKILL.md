@@ -58,7 +58,7 @@ export default async function walkTo(bot, { signal, args }) {
 
 Remove every listener and timer a program adds (`bot.off`, `clearInterval`) before it returns; leftovers keep firing into the next program.
 
-In the game process (`mineflayer-game`), a task's second argument carries the `signal`, which aborts on `node game.mjs cancel`. main then also clears the Pathfinder goal and stops PvP, but hands the character on only when your task has returned, so stop promptly. Listeners added with `ctx.on(emitter, event, fn)` are removed when the task ends; any other listener or timer is yours to remove.
+In the game process (`mineflayer-game`), a task's second argument carries the `signal`, which aborts on `node game.mjs cancel`. main then also clears the Pathfinder goal, stops PvP, block collecting, digging and eating, and puts the walking-only movements back, but hands the character on only when your task has returned, so stop promptly. Functions passed to `ctx.cleanup(fn)` run when the task leaves; any other listener or timer is yours to remove.
 
 ## Sharing one bot
 
@@ -118,7 +118,7 @@ npm install mineflayer mineflayer-pathfinder vec3
 npm install "mineflayer-world-memory@https://codeload.github.com/ueagohbbcd/mineflayer-agent-tools/tar.gz/<commit>"
 ```
 
-Pin `<commit>` to a commit of this repository; the package name stays `mineflayer-world-memory`. Optional plugins: `mineflayer-pvp`, `mineflayer-collectblock`, `mineflayer-auto-eat`.
+Pin `<commit>` to a commit of this repository; the package name stays `mineflayer-world-memory`. Optional plugins (the game template loads all of them): `mineflayer-pvp`, `mineflayer-auto-eat`, `mineflayer-armor-manager`, `mineflayer-tool`, `mineflayer-collectblock`.
 
 ```js
 import mineflayer from "mineflayer";
