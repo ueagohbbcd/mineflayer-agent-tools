@@ -14,7 +14,7 @@
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
-import { formatSummary } from '../lib/host.mjs'
+import { formatSummary } from '../lib/describe.mjs'
 import { blockedFile, readLock, socketPath } from '../lib/server.mjs'
 
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
@@ -121,7 +121,7 @@ try {
       await request({ type: 'status' }, msg => { out = msg }, { timeoutMs: 5000 })
       const c = out.controller
       console.log(out.alive ? '角色活着' : '角色已死亡')
-      console.log(`控制者：${c ? `${c.kind} ${c.name}${c.stuck ? '（不肯退出，需要重启进程）' : ''}` : '无'}`)
+      console.log(`控制者：${c ? `${c.kind} ${c.name}${{ exiting: '（正在退出）', stuck: '（不肯退出，需要重启进程）' }[c.phase] ?? ''}` : '无'}`)
       if (out.work) console.log(`${out.work.status === 'running' ? '当前工作' : '上一项工作'}：${formatSummary(out.work).split('\n')[0]}`)
       if (out.pending) console.log('有未取的报告：node game.mjs wait 会立即返回')
       break

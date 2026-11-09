@@ -1,23 +1,28 @@
 // SPDX-License-Identifier: MIT
 // The resident core: one bot, one current piece of work, one controller at a
-// time (task, service or idle), the exit flow, wake and reports.
+// time (task, service or idle), one exit flow, wake and reports. It knows
+// nothing about the game; stopping the bot's own actions is the injected
+// `cleanup`.
 //
-//   const host = createHost(bot, { dir, services, idle })
+//   const host = createHost(bot, { dir, services, idle, cleanup })
 //
 // services: { name: { check?(bot) → reason|null, run(bot, ctx) } }. A task
 // offers checkpoints with ctx.checkpoint({ name: 'pause' | 'stop' }); a module
 // asks for a takeover with host.takeover(name, { mode, reason }).
 //
-// Exit flow, shared by every way a controller ends (pause, stop, replace,
-// cancel, death): request exit (abort the signal) → block further task steps
-// (checkpoint throws) → stop current actions and clean up → confirm the run has
-// settled. Nothing else takes the bot before the confirmation. A run that has
-// not settled within graceMs stays the controller; the host wakes the model,
-// and the fallback is restarting the process.
+// Exit flow, shared by cancel, replace, takeover and death: the requester
+// records what comes next (`next`) and the controller's signal aborts → its
+// cleanups and the game cleanup run → the controller's promise settles →
+// settle() carries out `next`. Nothing else takes the bot before that. A later
+// request overrides an earlier one by rank: death > cancel = replace >
+// takeover. A controller still running graceMs after the request keeps the bot
+// (phase 'stuck') and the model is woken; when it settles at last, settle()
+// proceeds as usual. The fallback for one that never settles is restarting the
+// process.
 import fs from 'node:fs'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { stopGameActions } from './cleanup.mjs'
+import { describeController, describeNow, endWord, errorText, formatWork, summarizeWork, text } from './describe.mjs'
+import { loadDefault } from './query.mjs'
 
 export class ExitRequested extends Error {
   constructor (reason) {
@@ -27,24 +32,29 @@ export class ExitRequested extends Error {
   }
 }
 
+const RANK = { takeover: 1, cancel: 2, replace: 2, death: 3 }
+const EXIT_RULE = '每次 await 之后检查 ctx.signal.aborted，为真就返回'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const text = value => (typeof value === 'string' ? value : JSON.stringify(value))
 
 export function createHost (bot, {
   dir,
   services = {},
   idle = null,
-  cleanup = stopGameActions,
+  cleanup = () => {},
   graceMs = 5000,
   reportTimeoutMs = 3000,
   log = console.log
 } = {}) {
   if (!dir) throw new Error('createHost needs { dir }')
   const reports = [] // [name, fn]
-  let controller = null // { kind, name, ac, cleanups, done, exiting, stuck }
+  // The controller: { kind: 'task'|'service'|'idle', name, work, ac, cleanups,
+  // phase: 'running'|'exiting'|'stuck'|'done', why, confirms, mode, reason }
+  let controller = null
+  // What follows the current controller's exit, set by whoever asked for it:
+  // { kind, why, end?: result for its work, service?: { name, mode, reason }, start?: new work }
+  let next = null
   let work = null // the current piece of work, or the last one
   let workSeq = 0
-  let handoff = null // a takeover in progress
   let endSeq = 0 // works that have ended
   let alive = true
 
@@ -77,7 +87,7 @@ export function createHost (bot, {
     reasons = []
     const lines = []
     lines.push(why.length ? `唤醒原因：\n${why.map(r => `  ${r}`).join('\n')}` : '唤醒原因：无新唤醒')
-    lines.push(`现在：${describeNow()}`)
+    lines.push(`现在：${describeNow({ alive, work, controller })}`)
     if (ends > reportedEndSeq && work?.status === 'ended') lines.push(`最近结束的工作：${formatWork(work)}`)
     for (const [name, fn] of reports) {
       try {
@@ -87,7 +97,7 @@ export function createHost (bot, {
         ])
         if (out) lines.push(`== ${name} ==\n${text(out).trimEnd()}`)
       } catch (error) {
-        lines.push(`== ${name} ==\n报告出错：${error?.message ?? error}`)
+        lines.push(`== ${name} ==\n报告出错：${errorText(error)}`)
       }
     }
     consumedGen = Math.max(consumedGen, gen)
@@ -110,7 +120,7 @@ export function createHost (bot, {
     })
   }
 
-  /** Resolves with the report text once something is pending. */
+  /** Resolves with the report text once something is pending; null if the signal aborts first. */
   function waitForReport (signal) {
     return new Promise(resolve => {
       const waiter = report => resolve(report)
@@ -120,92 +130,7 @@ export function createHost (bot, {
     })
   }
 
-  // ---- controllers -----------------------------------------------------------
-  function makeController (kind, name) {
-    return { kind, name, ac: new AbortController(), cleanups: [], done: null, exiting: null, stuck: false }
-  }
-
-  async function runCleanups (ctrl) {
-    for (const fn of ctrl.cleanups.splice(0).reverse()) {
-      try { await fn() } catch (error) { log(`清理出错（${ctrl.name}）：${error?.message ?? error}`) }
-    }
-    try { await cleanup(bot) } catch (error) { log(`游戏清理出错：${error?.message ?? error}`) }
-  }
-
-  /** The exit flow. Idempotent: every caller gets the same promise. */
-  function exitFlow (ctrl, reason) {
-    if (ctrl.exiting) return ctrl.exiting
-    ctrl.exiting = (async () => {
-      ctrl.exitReason = reason
-      ctrl.ac.abort(new ExitRequested(reason))
-      await runCleanups(ctrl)
-      const settled = await Promise.race([ctrl.done.then(() => true), sleep(graceMs).then(() => false)])
-      if (!settled) {
-        ctrl.stuck = true
-        const msg = `${describeController(ctrl)} 收到退出请求（${reason}）后 ${graceMs / 1000} 秒没有退出，仍占着角色。需要重启游戏进程：node game.mjs stop，然后重新启动 main。`
-        log(msg)
-        emitWork('event', msg)
-        wake(msg)
-        ctrl.done.then(async () => { // it did exit in the end
-          ctrl.stuck = false
-          await runCleanups(ctrl)
-          if (controller === ctrl) controller = null
-          if (ctrl.work?.status === 'running') finishWork(ctrl.work, { ok: false, ended: 'late-exit', reason: ctrl.exitReason })
-          wake(`${describeController(ctrl)} 终于退出了`)
-          startIdle()
-        })
-        return false
-      }
-      await runCleanups(ctrl) // whatever the run started while unwinding
-      if (controller === ctrl) controller = null
-      return true
-    })()
-    return ctrl.exiting
-  }
-
-  /** Ends the current controller, if any. False when it would not exit. */
-  async function release (reason) {
-    const ctrl = controller
-    if (!ctrl) return true
-    return exitFlow(ctrl, reason)
-  }
-
-  // ---- idle ----------------------------------------------------------------
-  let idleErrors = 0
-  function startIdle () {
-    if (!idle || controller || handoff || !alive || work?.status === 'running') return
-    const ctrl = makeController('idle', 'idle')
-    controller = ctrl
-    ctrl.done = Promise.resolve()
-      .then(() => idle(bot, controllerCtx(ctrl)))
-      .then(() => ({ ok: true }), error => ({ ok: false, error }))
-    ctrl.done.then(async outcome => {
-      if (ctrl.exiting) return
-      await runCleanups(ctrl)
-      if (controller === ctrl) controller = null
-      if (!outcome.ok && !(outcome.error instanceof ExitRequested)) {
-        idleErrors++
-        const msg = `idle 出错：${outcome.error?.message ?? outcome.error}`
-        log(msg)
-        if (idleErrors <= 3) wake(msg)
-        setTimeout(startIdle, 2000)
-      } else {
-        setTimeout(startIdle, 1000)
-      }
-    })
-  }
-
-  function controllerCtx (ctrl) {
-    return {
-      signal: ctrl.ac.signal,
-      cleanup: fn => { ctrl.cleanups.push(fn) },
-      wake,
-      takeover: (name, opts) => takeover(name, opts),
-      get exiting () { return ctrl.ac.signal.aborted }
-    }
-  }
-
-  // ---- work and tasks -------------------------------------------------------
+  // ---- work ----------------------------------------------------------------
   function emitWork (type, value, w = work) {
     if (!w) return
     const msg = { type, ...(typeof value === 'object' && value !== null ? value : { text: value }) }
@@ -224,51 +149,166 @@ export function createHost (bot, {
     // After a death the bot may already stand at its respawn point; the death
     // position is in the end word instead.
     w.position = p && result.ended !== 'death' ? [p.x, p.y, p.z].map(n => Math.round(n * 10) / 10) : null
-    writeResult(w)
     emitWork('result', { summary: summarizeWork(w) }, w)
     w.sinks.clear()
     wake(`工作 ${w.id} ${endWord(w)}`)
   }
 
+  // ---- controllers ---------------------------------------------------------
+  async function runCleanups (ctrl) {
+    for (const fn of ctrl.cleanups.splice(0).reverse()) {
+      try { await fn() } catch (error) { log(`清理出错（${ctrl.name}）：${errorText(error)}`) }
+    }
+    try { await cleanup(bot) } catch (error) { log(`游戏清理出错：${errorText(error)}`) }
+  }
+
+  /** Make `run(ctx, ctrl)` the controller; settle() runs when it settles. */
+  function start (kind, name, w, run, extra = {}) {
+    const ctrl = { kind, name, work: w, ac: new AbortController(), cleanups: [], phase: 'running', confirms: [], ...extra }
+    controller = ctrl
+    const ctx = {
+      signal: ctrl.ac.signal,
+      cleanup: fn => { ctrl.cleanups.push(fn) },
+      wake,
+      takeover: (service, opts) => takeover(service, opts)
+    }
+    Promise.resolve()
+      .then(() => run(ctx, ctrl))
+      .then(value => ({ ok: true, value }), error => ({ ok: false, error }))
+      .then(outcome => settle(ctrl, outcome))
+      .catch(error => log(`交接出错：${error?.stack ?? error}`))
+  }
+
+  /**
+   * The exit flow. Records `intent` as what comes next (unless a higher-ranked
+   * one is already recorded) and asks the controller to exit once. Resolves
+   * true when it has exited and the intent was carried out, false when it has
+   * not exited within graceMs.
+   */
+  function requestExit (intent) {
+    if (!next || RANK[intent.kind] >= RANK[next.kind]) next = intent
+    const ctrl = controller
+    if (!ctrl) {
+      proceed(null, null)
+      return Promise.resolve(true)
+    }
+    if (ctrl.phase === 'stuck') return Promise.resolve(false)
+    const confirmed = new Promise(resolve => ctrl.confirms.push(resolve))
+    if (ctrl.phase === 'running') {
+      ctrl.phase = 'exiting'
+      ctrl.why = intent.why
+      ctrl.ac.abort(new ExitRequested(intent.why))
+      runCleanups(ctrl) // stop what it is doing now; again after it settles
+      setTimeout(() => markStuck(ctrl), graceMs)
+    }
+    return confirmed
+  }
+
+  function markStuck (ctrl) {
+    if (controller !== ctrl || ctrl.phase !== 'exiting') return
+    ctrl.phase = 'stuck'
+    const last = ctrl.work?.log.at(-1)
+    const msg = `${describeController(ctrl)} 收到退出请求（${ctrl.why}）后 ${graceMs / 1000} 秒没有退出，仍占着角色` +
+      `${last ? `；它最后输出的一行：${last}` : ''}。任务要做到：${EXIT_RULE}。` +
+      '现在要恢复就重启游戏进程：node game.mjs stop，然后重新启动 main。'
+    log(msg)
+    emitWork('event', msg, ctrl.work)
+    wake(msg)
+    for (const resolve of ctrl.confirms.splice(0)) resolve(false)
+  }
+
+  /** Runs once whenever a controller's promise settles, whether or not an exit was requested. */
+  async function settle (ctrl, outcome) {
+    const asked = ctrl.phase !== 'running'
+    const wasStuck = ctrl.phase === 'stuck'
+    ctrl.phase = 'done'
+    await runCleanups(ctrl)
+    controller = null
+    if (wasStuck) wake(`${describeController(ctrl)} 终于退出了`)
+    // After an exit request the controller's own outcome (usually the abort)
+    // does not matter: the recorded intent decides.
+    proceed(ctrl, asked ? null : outcome)
+    for (const resolve of ctrl.confirms.splice(0)) resolve(true)
+  }
+
+  /**
+   * Decides what follows `ctrl` (null when there was no controller): a queued
+   * service, else a restart of the task, else the end of the work; then the
+   * replacing work or idle.
+   */
+  function proceed (ctrl, outcome) {
+    const intent = next
+    next = null
+    const w = ctrl ? ctrl.work : (work?.status === 'running' ? work : null)
+    let end = intent?.end ?? null
+    let restart = false
+    if (ctrl?.kind === 'task' && outcome) {
+      end = outcome.ok ? { ok: true, value: outcome.value } : { ok: false, error: errorText(outcome.error) }
+    }
+    if (ctrl?.kind === 'service' && outcome) {
+      const after = outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${errorText(outcome.error)}`
+      emitWork('event', `[介入] ${ctrl.name} ${after}`, w)
+      if (!w) wake(`${ctrl.name} ${after}`)
+      restart = ctrl.mode === 'pause'
+      end = { ok: false, stoppedBy: ctrl.name, reason: ctrl.reason, service: after }
+    }
+    const running = w?.status === 'running'
+
+    if (alive && intent?.service) return startService(intent.service, running ? w : null)
+    if (alive && restart && running) {
+      emitWork('event', `[重启] 第 ${w.attempts + 1} 次从入口运行`, w)
+      return startAttempt(w)
+    }
+    if (running && end) finishWork(w, end)
+    if (alive && intent?.start) {
+      work = intent.start
+      return startAttempt(work)
+    }
+    if (ctrl?.kind === 'idle' && outcome) return idleEnded(outcome)
+    startIdle()
+  }
+
+  // ---- tasks, services, idle -------------------------------------------------
   function startAttempt (w) {
     w.attempts++
-    const ctrl = makeController('task', w.id)
-    ctrl.work = w
-    controller = ctrl
-    const base = controllerCtx(ctrl)
-    const ctx = {
-      ...base,
-      args: w.args,
-      attempt: w.attempts,
-      log: (...parts) => {
-        const line = parts.map(text).join(' ')
-        w.log.push(line)
-        if (w.log.length > 30) w.log.shift()
-        emitWork('log', { line }, w)
-      },
-      checkpoint: spec => checkpoint(ctrl, spec),
-      get exiting () { return ctrl.ac.signal.aborted }
-    }
-    ctrl.done = (async () => {
-      const mtime = fs.statSync(w.file).mtimeMs
-      const mod = await import(`${pathToFileURL(w.file).href}?v=${mtime}`)
-      if (typeof mod.default !== 'function') throw new Error(`${w.file} 没有 export default async function (bot, ctx)`)
-      return mod.default(bot, ctx)
-    })().then(value => ({ ok: true, value }), error => ({ ok: false, error }))
-    ctrl.done.then(async outcome => {
-      if (ctrl.exiting) return // whoever asked for the exit decides what comes next
-      await runCleanups(ctrl)
-      if (controller === ctrl) controller = null
-      if (w.status === 'running') {
-        finishWork(w, outcome.ok
-          ? { ok: true, value: outcome.value }
-          : { ok: false, error: outcome.error?.message ?? String(outcome.error) })
-      }
-      startIdle()
+    start('task', w.id, w, async (ctx, ctrl) => {
+      const task = await loadDefault(w.file)
+      return task(bot, {
+        ...ctx,
+        args: w.args,
+        attempt: w.attempts,
+        log: (...parts) => {
+          const line = parts.map(text).join(' ')
+          w.log.push(line)
+          if (w.log.length > 30) w.log.shift()
+          emitWork('log', { line }, w)
+        },
+        checkpoint: spec => checkpoint(ctrl, spec)
+      })
     })
   }
 
-  /** A checkpoint offered by the running task. Throws ExitRequested on handoff. */
+  function startService ({ name, mode, reason }, w) {
+    start('service', name, w, ctx => services[name].run(bot, { ...ctx, reason }), { mode, reason })
+  }
+
+  function startIdle () {
+    if (!idle || controller || !alive || work?.status === 'running') return
+    start('idle', 'idle', null, ctx => idle(bot, ctx))
+  }
+
+  // idle returned or threw by itself: start it again after a pause.
+  let idleErrors = 0
+  function idleEnded (outcome) {
+    if (outcome.ok) return setTimeout(startIdle, 1000)
+    idleErrors++
+    const msg = `idle 出错：${errorText(outcome.error)}`
+    log(msg)
+    if (idleErrors <= 3) wake(msg)
+    setTimeout(startIdle, 2000)
+  }
+
+  /** A checkpoint offered by the running task. Throws ExitRequested when a service takes over. */
   async function checkpoint (ctrl, spec = {}) {
     if (ctrl.ac.signal.aborted) throw ctrl.ac.signal.reason
     for (const [name, mode] of Object.entries(spec)) {
@@ -276,85 +316,38 @@ export function createHost (bot, {
       if (!service) throw new Error(`没有名为 ${name} 的服务（已有：${Object.keys(services).join(', ') || '无'}）`)
       if (typeof service.check !== 'function') continue
       let reason
-      try { reason = await service.check(bot) } catch (error) { reason = null; log(`服务 ${name} 检查出错：${error?.message ?? error}`) }
+      try { reason = await service.check(bot) } catch (error) { reason = null; log(`服务 ${name} 检查出错：${errorText(error)}`) }
       if (reason) {
-        takeover(name, { mode, reason: text(reason), by: 'checkpoint' })
+        takeover(name, { mode, reason: text(reason) })
         throw new ExitRequested(`介入：${name}`)
       }
     }
   }
 
   /**
-   * Hand the bot to a service. From a task checkpoint, or asked by a module.
-   * mode 'pause' restarts the task from its entry afterwards; 'stop' (the
-   * default for module requests) ends the work and goes to idle.
+   * Hand the bot to a service. mode 'pause' restarts the task from its entry
+   * afterwards; 'stop' (the default) ends the work and goes to idle.
    */
-  function takeover (name, { mode = 'stop', reason = '', by = 'module' } = {}) {
-    const service = services[name]
-    if (!service) return { ok: false, error: `没有名为 ${name} 的服务` }
-    if (handoff) return { ok: false, error: `交接进行中（${handoff.name}）` }
-    if (controller?.kind === 'service') return { ok: false, error: `服务 ${controller.name} 正在控制` }
+  function takeover (name, { mode = 'stop', reason = '' } = {}) {
+    if (!services[name]) return { ok: false, error: `没有名为 ${name} 的服务` }
     if (!alive) return { ok: false, error: '角色已死亡' }
-    handoff = { name, mode, reason }
-    const w = work?.status === 'running' ? work : null
-    const prev = controller
-    const done = (async () => {
-      try {
-        const modeWord = !w ? '' : mode === 'pause' ? '，结束后从入口重新运行任务' : '，结束后转 idle'
-        const msg = `${name} 接管（${reason || '无原因'}）${modeWord}`
-        log(msg)
-        emitWork('event', `[介入] ${msg}`, w)
-        wake(msg)
-        if (prev && !(await exitFlow(prev, `介入：${name}`))) return
-        if (w && w.status !== 'running') return // ended while exiting (death, cancel)
-        if (!alive) return
-        const ctrl = makeController('service', name)
-        ctrl.work = w
-        controller = ctrl
-        ctrl.done = Promise.resolve()
-          .then(() => service.run(bot, { ...controllerCtx(ctrl), reason }))
-          .then(value => ({ ok: true, value }), error => ({ ok: false, error }))
-        const outcome = await ctrl.done
-        if (ctrl.exiting) return // cancelled meanwhile; late completion restarts nothing
-        await runCleanups(ctrl)
-        if (controller === ctrl) controller = null
-        const after = outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${outcome.error?.message ?? outcome.error}`
-        emitWork('event', `[介入] ${name} ${after}`, w)
-        if (w && w.status === 'running' && !w.cancelled) {
-          if (mode === 'pause' && prev?.kind === 'task') {
-            emitWork('event', `[重启] 第 ${w.attempts + 1} 次从入口运行`, w)
-            handoff = null
-            startAttempt(w)
-            return
-          }
-          finishWork(w, { ok: false, stoppedBy: name, reason, service: after })
-        } else if (!w) {
-          wake(`${name} ${after}`)
-        }
-      } catch (error) {
-        log(`交接出错：${error?.stack ?? error}`)
-      } finally {
-        if (handoff?.name === name) handoff = null
-        startIdle()
-      }
-    })()
+    if (next) return { ok: false, error: `退出进行中（${next.why}）` }
+    if (controller?.kind === 'service') return { ok: false, error: `服务 ${controller.name} 正在控制` }
+    const w = controller?.kind === 'task' ? controller.work : null
+    const modeWord = !w ? '' : mode === 'pause' ? '，结束后从入口重新运行任务' : '，结束后转 idle'
+    const msg = `${name} 接管（${reason || '无原因'}）${modeWord}`
+    log(msg)
+    emitWork('event', `[介入] ${msg}`, w)
+    wake(msg)
+    const done = requestExit({ kind: 'takeover', why: `介入：${name}`, service: { name, mode, reason } })
     return { ok: true, done }
   }
 
   /** Submit a task file as the current work. A running work is replaced. */
   async function submit (file, { args = [], sink } = {}) {
     if (!alive) return { ok: false, error: '角色已死亡，等重生后再提交' }
-    if (handoff) return { ok: false, error: `交接进行中（${handoff.name}），稍后再提交` }
     const abs = path.resolve(file)
     if (!fs.existsSync(abs)) return { ok: false, error: `找不到文件 ${abs}` }
-    if (work?.status === 'running') {
-      const old = work
-      old.cancelled = true
-      if (!(await release(`被新工作替换`))) return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
-      finishWork(old, { ok: false, ended: 'replaced' })
-    } else if (!(await release('开始新工作'))) {
-      return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
-    }
     const w = {
       id: `w${++workSeq}-${path.basename(abs, path.extname(abs))}`,
       file: abs,
@@ -363,92 +356,48 @@ export function createHost (bot, {
       status: 'running',
       startedAt: Date.now(),
       log: [],
-      sinks: new Set(sink ? [sink] : []),
-      cancelled: false
+      sinks: new Set(sink ? [sink] : [])
     }
-    work = w
-    startAttempt(w)
+    const replacing = work?.status === 'running'
+    const intent = { kind: 'replace', why: replacing ? '被新工作替换' : '开始新工作', end: { ok: false, ended: 'replaced' }, start: w }
+    if (!(await requestExit(intent))) {
+      // The new work will not start; the old one ends as cancelled whenever it exits.
+      if (next === intent) next = { kind: 'cancel', why: intent.why, end: { ok: false, ended: 'cancelled', reason: '换工作时不肯退出' } }
+      return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
+    }
+    if (work !== w) return { ok: false, error: alive ? '这次提交被之后的提交或取消取代，没有开始' : '角色已死亡，工作没有开始' }
     return { ok: true, id: w.id, work: w }
   }
 
-  /** Explicit cancel: exit flow plus no restart. */
+  /** Explicit cancel: the exit flow, and nothing queued runs afterwards. */
   async function cancel (reason = '已取消') {
     const w = work?.status === 'running' ? work : null
     if (!w) return { ok: true, note: '没有正在进行的工作' }
-    w.cancelled = true
-    const ok = await release(reason)
-    if (!ok) return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
-    finishWork(w, { ok: false, ended: 'cancelled', reason })
-    startIdle()
+    if (!(await requestExit({ kind: 'cancel', why: reason, end: { ok: false, ended: 'cancelled', reason } }))) {
+      return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
+    }
     return { ok: true, summary: summarizeWork(w) }
   }
 
   // ---- death and respawn ----------------------------------------------------
+  const here = () => {
+    const p = bot.entity?.position
+    return p ? [p.x, p.y, p.z].map(Math.floor).join(' ') : '?'
+  }
   bot.on('death', () => {
     alive = false
-    const p = bot.entity?.position
-    const where = p ? [p.x, p.y, p.z].map(Math.floor).join(' ') : '?'
-    const w = work?.status === 'running' ? work : null
-    if (w) w.cancelled = true
-    const ctrl = controller
-    ;(async () => {
-      if (ctrl) await exitFlow(ctrl, '死亡')
-      if (w) finishWork(w, { ok: false, ended: 'death', where })
-    })()
+    const where = here()
+    if (controller || work?.status === 'running') {
+      requestExit({ kind: 'death', why: '死亡', end: { ok: false, ended: 'death', where } })
+    }
     wake(`死亡，位置 ${where}`)
   })
   bot.on('spawn', () => {
-    if (alive) return
-    if ((bot.health ?? 20) <= 0) return
+    if (alive || (bot.health ?? 20) <= 0) return
     alive = true
-    const p = bot.entity?.position
-    wake(`重生，位置 ${p ? [p.x, p.y, p.z].map(Math.floor).join(' ') : '?'}`)
+    wake(`重生，位置 ${here()}`)
     setTimeout(startIdle, 500)
   })
-
-  // ---- read-only queries -----------------------------------------------------
-  async function query (file, { args = [], timeoutMs = 10000 } = {}) {
-    const abs = path.resolve(file)
-    const lines = []
-    const ac = new AbortController()
-    const run = (async () => {
-      try {
-        const mtime = fs.statSync(abs).mtimeMs
-        const mod = await import(`${pathToFileURL(abs).href}?v=${mtime}`)
-        if (typeof mod.default !== 'function') throw new Error(`${file} 没有 export default async function (bot, ctx)`)
-        return { ok: true, result: await mod.default(bot, { args, signal: ac.signal, log: (...p) => lines.push(p.map(text).join(' ')) }) }
-      } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) }
-      }
-    })()
-    let timer
-    const out = await Promise.race([run, new Promise(resolve => { timer = setTimeout(() => { ac.abort(); resolve({ ok: false, error: `查询 ${timeoutMs / 1000} 秒没有返回` }) }, timeoutMs) })])
-    clearTimeout(timer)
-    return { ...out, log: lines }
-  }
-
-  // ---- descriptions -----------------------------------------------------------
-  function describeController (ctrl) {
-    if (!ctrl) return '无'
-    return { task: `任务 ${ctrl.name}`, service: `服务 ${ctrl.name}`, idle: 'idle' }[ctrl.kind] ?? ctrl.name
-  }
-
-  function describeNow () {
-    if (!alive) return '角色已死亡，等待重生'
-    const parts = []
-    if (work?.status === 'running') parts.push(`工作 ${work.id} 进行中（第 ${work.attempts} 次运行）`)
-    else parts.push('没有工作在进行')
-    parts.push(`控制者：${describeController(controller)}${controller?.stuck ? '（不肯退出，需要重启进程）' : ''}`)
-    return parts.join('；')
-  }
-
-  function writeResult (w) {
-    try {
-      const file = path.join(dir, '.game', 'results', `${w.id}.json`)
-      fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, JSON.stringify(summarizeWork(w), null, 2) + '\n')
-    } catch {}
-  }
 
   // Created after spawn (the usual case): idle starts now.
   if (bot.entity) setTimeout(startIdle, 0)
@@ -463,55 +412,15 @@ export function createHost (bot, {
     submit,
     cancel,
     takeover,
-    query,
     addReport: (name, fn) => { reports.push([name, fn]) },
     status: () => ({
       alive,
-      controller: controller && { kind: controller.kind, name: controller.name, stuck: controller.stuck },
+      controller: controller && { kind: controller.kind, name: controller.name, phase: controller.phase },
       work: work && summarizeWork(work),
       pending: pending(),
-      handoff
+      next: next?.kind ?? null
     }),
     get controller () { return controller },
     get work () { return work }
   }
-}
-
-function endWord (w) {
-  const r = w.result ?? {}
-  if (r.ok) return '完成'
-  if (r.ended === 'death') return `因死亡结束（${r.where}）`
-  if (r.ended === 'cancelled') return '已取消'
-  if (r.ended === 'replaced') return '被新工作替换'
-  if (r.ended === 'late-exit') return `收到退出请求（${r.reason}）后很久才退出`
-  if (r.stoppedBy) return `被 ${r.stoppedBy} 接管后结束（${r.reason}）`
-  return `失败：${r.error}`
-}
-
-export function summarizeWork (w) {
-  return {
-    id: w.id,
-    file: w.file,
-    args: w.args,
-    status: w.status,
-    attempts: w.attempts,
-    seconds: Math.round(((w.endedAt ?? Date.now()) - w.startedAt) / 100) / 10,
-    ...(w.result ?? {}),
-    end: w.status === 'ended' ? endWord(w) : undefined,
-    position: w.position ?? undefined,
-    log: w.log.length ? w.log : undefined
-  }
-}
-
-export function formatWork (w) {
-  return formatSummary(summarizeWork(w))
-}
-
-export function formatSummary (s) {
-  const lines = [`${s.id} ${s.end ?? '进行中'}（${s.seconds} 秒，运行 ${s.attempts} 次）`]
-  if (s.ok && s.value !== undefined) lines.push(`结果：${text(s.value)}`)
-  if (s.service) lines.push(`接管服务：${s.service}`)
-  if (s.position) lines.push(`位置：${s.position.join(' ')}`)
-  if (s.log) lines.push(`任务输出（最后 ${s.log.length} 行）：`, ...s.log.map(l => `  ${l}`))
-  return lines.join('\n')
 }

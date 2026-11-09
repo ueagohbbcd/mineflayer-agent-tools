@@ -17,6 +17,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import watchdogModule from '../../watchdog.js'
 import { gameDir } from './files.mjs'
+import { runQuery } from './query.mjs'
 
 const { watchdog } = watchdogModule
 
@@ -130,7 +131,7 @@ async function handle (host, request, conn) {
       return end(conn, { type: 'report', text: report })
     }
     case 'query':
-      return end(conn, { type: 'query', ...(await host.query(request.file, { args: request.args ?? [], timeoutMs: request.timeoutMs })) })
+      return end(conn, { type: 'query', ...(await runQuery(host.bot, request.file, { args: request.args ?? [], timeoutMs: request.timeoutMs })) })
     case 'status':
       return end(conn, { type: 'status', ...host.status() })
     default:

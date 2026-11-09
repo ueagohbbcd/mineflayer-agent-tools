@@ -2,7 +2,10 @@
 // Builds bundle/mineflayer-agent, the one-skill bundle, from skills/:
 // mineflayer-game is its SKILL.md, each other skill becomes references/<name>.md,
 // and each one's intro.md is its paragraph in the bundle's "Guides".
-// Run after changing a skill; test/bundle.test.mjs checks it is up to date.
+// First it copies the player guide, game/template/AGENTS.md (the one source of
+// the task contract), into the marked block of skills/mineflayer-game/SKILL.md.
+// Run after changing a skill or the player guide; test/bundle.test.mjs checks
+// both are up to date.
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +22,32 @@ const ORDER = [
 ];
 const DESCRIPTION =
   "Play Minecraft Java through a real Mineflayer bot, all in one skill: one game process that holds the character, tasks and queries, keeping a wait running for notices, looking at the world, the example tasks, and guides on writing tasks and setup, moving, looking, items and survival. Use it instead of the separate mineflayer-* skills.";
+
+const PLAYER_GUIDE = join(root, "game", "template", "AGENTS.md");
+const BEGIN = "<!-- BEGIN player guide:";
+const END = "<!-- END player guide -->";
+
+/** skills/mineflayer-game/SKILL.md with the player guide's sections (all but its title, intro and notes) in the marked block. */
+export async function gameSkillWithGuide() {
+  const skill = await readFile(join(root, "skills", TOP, "SKILL.md"), "utf8");
+  const guide = await readFile(PLAYER_GUIDE, "utf8");
+  const from = guide.indexOf("\n## ");
+  const to = guide.indexOf("\n## Notes for this world");
+  if (from < 0 || to < 0)
+    throw new Error("game/template/AGENTS.md needs ## sections and a \"## Notes for this world\" section");
+  const begin = skill.indexOf(BEGIN);
+  const beginEnd = skill.indexOf("-->", begin) + 3;
+  const end = skill.indexOf(END);
+  if (begin < 0 || end < beginEnd)
+    throw new Error(`skills/${TOP}/SKILL.md has no player guide block`);
+  return (
+    skill.slice(0, beginEnd) +
+    "\n\n" +
+    guide.slice(from + 1, to).trim() +
+    "\n\n" +
+    skill.slice(end)
+  );
+}
 
 const body = (text) => text.replace(/^---\n[^]*?\n---\n+/, "");
 const generated = (source) =>
@@ -65,9 +94,7 @@ export async function buildBundle() {
     );
     guides.push(intro);
   }
-  const top = body(
-    await readFile(join(root, "skills", TOP, "SKILL.md"), "utf8"),
-  );
+  const top = body(await gameSkillWithGuide());
   const start = top.indexOf("## The other skills");
   if (start < 0)
     throw new Error(
@@ -90,6 +117,7 @@ export async function buildBundle() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  await writeFile(join(root, "skills", TOP, "SKILL.md"), await gameSkillWithGuide());
   const out = join(root, "bundle", NAME);
   await rm(out, { recursive: true, force: true });
   for (const [path, text] of await buildBundle()) {

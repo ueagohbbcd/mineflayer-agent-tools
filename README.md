@@ -22,7 +22,7 @@ returns a live block first; only previously received *unloaded* chunks may
 supply historical (potentially stale) fallback. Pass `null` for memory to
 operate without any history collection.
 
-See [project scope](docs/project-scope.md).
+See [project scope](docs/project-scope.md), the [principles](docs/principles.md) behind the design and the [lessons](docs/lessons.md) they come from.
 
 To let an agent play through Mineflayer, start from [`game/`](game/README.md):
 copy `game/template/` into a project, run `node main.mjs` in the background
@@ -170,7 +170,7 @@ services should serialize it or wrap getters rather than expose mutation.
 
 ## Example programs
 
-`examples/*.mjs` are short modules, each showing one way to do a task: trips with Pathfinder (plain, with defense, with eating), fighting a target, building with meals, reach maps and place graphs, and a few read-only lookups. Agents read them, run them (`node game.mjs task <toolkit>/examples/navigate.mjs X Y Z`; read-only ones with `node game.mjs query`), import them from their own tasks, or copy and change them. They need `mineflayer-pathfinder`, `mineflayer-pvp` and `vec3` installed beside this package.
+`examples/*.mjs` are short modules, each showing one way to do a task that the game candidates and plugins do not already show: reach maps and place graphs, terrain summaries, pictures, and a few read-only lookups. Agents read them, run them (`node game.mjs query <toolkit>/examples/reach-map.mjs`), import them from their own tasks, or copy and change them. Travelling is `game/candidates/goto.mjs`; fighting and eating are the services in `game/candidates/services.mjs`, backed by mineflayer-pvp and mineflayer-auto-eat. The examples need `vec3` installed beside this package.
 
 ## Tests
 

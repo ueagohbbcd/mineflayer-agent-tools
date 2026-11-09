@@ -184,23 +184,121 @@ test('the exit flow runs once even when requested twice', async () => {
   assert.equal(r.result().ended, 'cancelled')
 })
 
-test('a task that ignores the exit keeps control: nothing else starts, the model is woken', async () => {
-  const services = { defend: { run: async () => 'ran' } }
+test('a task that ignores the exit keeps control: nothing else starts, the model is woken, then things proceed', async () => {
+  const order = []
+  const services = { defend: { run: async () => { order.push('defend'); return 'ran' } } }
   const { host, file, run } = setup({ services })
-  const r = await run(file('stubborn', 'export default async () => { await new Promise(r => setTimeout(r, 1500)); return "late" }'))
+  const r = await run(file('stubborn', `export default async (bot, ctx) => {
+    ctx.log('digging the last block')
+    await new Promise(r => setTimeout(r, 1500)); return "late"
+  }`))
   await sleep(20)
   const t = host.takeover('defend', { reason: 'x' })
-  await t.done
+  assert.equal(await t.done, false)
   assert.equal(host.controller.kind, 'task')
-  assert.equal(host.controller.stuck, true)
+  assert.equal(host.controller.phase, 'stuck')
+  assert.equal(host.takeover('defend').ok, false, 'no second request while stuck')
   const report = await host.waitForReport()
-  assert.match(report, /没有退出，仍占着角色/)
+  assert.match(report, /没有退出，仍占着角色；它最后输出的一行：digging the last block/)
+  assert.match(report, /每次 await 之后检查 ctx\.signal\.aborted，为真就返回/)
+  assert.deepEqual(order, [])
   assert.equal(r.result(), undefined)
-  // When it finally returns, control is released and the model hears of it.
-  await until(() => host.controller === null || host.controller?.kind === 'idle', 3000)
+  // When it finally returns, the queued service runs as usual and the model hears of it.
+  await until(() => r.result(), 3000)
+  assert.deepEqual(order, ['defend'])
+  assert.equal(r.result().stoppedBy, 'defend')
   assert.match(await host.waitForReport(), /终于退出了/)
+})
+
+test('a cancel while stuck ends the work as cancelled once the task finally exits', async () => {
+  const { host, file, run } = setup()
+  const r = await run(file('stubborn2', 'export default async () => { await new Promise(r => setTimeout(r, 800)); return "late" }'))
+  await sleep(20)
+  const c = await host.cancel()
+  assert.equal(c.ok, false)
+  await until(() => r.result(), 3000)
+  assert.equal(r.result().ended, 'cancelled')
+})
+
+test('takeover then cancel before the task has exited: the service never starts, idle follows', async () => {
+  const order = []
+  const services = { defend: { run: async () => { order.push('defend'); await sleep(200); return 'safe' } } }
+  const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
+  const { host, file, run } = setup({ services, idle })
+  await until(() => host.controller?.kind === 'idle')
+  order.length = 0
+  // Leaves 50 ms after the exit request, so cancel arrives while it is exiting.
+  const r = await run(file('slowexit', `export default async (bot, ctx) => {
+    await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
+  }`))
+  await sleep(20)
+  assert.equal(host.takeover('defend', { reason: 'zombie' }).ok, true)
+  const c = await host.cancel()
+  assert.equal(c.ok, true)
+  assert.equal(r.result().ended, 'cancelled')
+  await until(() => host.controller?.kind === 'idle')
+  await sleep(100)
+  assert.deepEqual(order, ['idle'])
+  assert.equal(host.controller.kind, 'idle')
+})
+
+test('cancel while a service holds the work ends the service and the work, then idle', async () => {
+  const order = []
+  const services = {
+    defend: { run: async (bot, ctx) => { order.push('defend'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)); order.push('defend left') } }
+  }
+  const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
+  const { host, file, run } = setup({ services, idle })
+  await until(() => host.controller?.kind === 'idle')
+  order.length = 0
+  const r = await run(file('held', `export default async (bot, ctx) => {
+    await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
+  }`))
+  await sleep(20)
+  host.takeover('defend', { reason: 'zombie' })
+  await until(() => host.controller?.kind === 'service')
+  const c = await host.cancel()
+  assert.equal(c.ok, true)
+  assert.equal(r.result().ended, 'cancelled')
+  await until(() => host.controller?.kind === 'idle')
+  assert.deepEqual(order, ['defend', 'defend left', 'idle'])
+})
+
+test('submitting new work while a takeover is queued replaces it; the service never starts', async () => {
+  const order = []
+  const services = { defend: { run: async () => { order.push('defend') } } }
+  const { host, file, run } = setup({ services })
+  const a = await run(file('a2', `export default async (bot, ctx) => {
+    await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
+  }`))
+  await sleep(20)
+  host.takeover('defend')
+  const b = await run(file('b2', 'export default async () => "b"'))
+  assert.equal(b.out.ok, true)
+  await until(() => b.result())
+  assert.equal(a.result().ended, 'replaced')
+  assert.deepEqual(order, [])
+})
+
+test('death while a takeover is queued: the service never starts, no idle before respawn', async () => {
+  const order = []
+  const services = { defend: { run: async () => { order.push('defend') } } }
+  const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
+  const { host, bot, file, run } = setup({ services, idle })
+  await until(() => host.controller?.kind === 'idle')
+  order.length = 0
+  const r = await run(file('dies', `export default async (bot, ctx) => {
+    await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
+  }`))
+  await sleep(20)
+  host.takeover('defend')
+  bot.health = 0
+  bot.emit('death')
   await until(() => r.result())
-  assert.equal(r.result().ended, 'late-exit')
+  assert.equal(r.result().ended, 'death')
+  await sleep(100)
+  assert.equal(host.controller, null)
+  assert.deepEqual(order, [])
 })
 
 test('client leaving does not cancel; explicit cancel does', async () => {

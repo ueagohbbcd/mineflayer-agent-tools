@@ -23,5 +23,5 @@ If you look in one program and take in the next, check that `bot.currentWindow` 
 
 ## Examples
 
-- [build-with-autoeat.mjs](../../examples/build-with-autoeat.mjs): placing a planned list of blocks, eating between steps.
+- [craft.mjs](../../game/candidates/craft.mjs): `craftChecked`, crafting by name and checking the count rose.
 - [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs): checking that no entity blocks a placement (read-only).

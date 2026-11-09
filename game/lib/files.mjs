@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: MIT
-// Project-directory files: records and task results live under the
+// Project-directory files: records and run files live under the
 // game project so every shell command can read them, online or offline.
 import fs from 'node:fs'
 import path from 'node:path'
 
 export function gameDir (dir) {
   return path.join(dir, '.game')
-}
-
-export function resultsDir (dir) {
-  return path.join(gameDir(dir), 'results')
 }
 
 export function recordsDir (dir) {

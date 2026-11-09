@@ -4,14 +4,13 @@
  *
  *   node game.mjs run <toolkit>/examples/watch-surroundings.mjs [block=chest] [seconds=600]
  *
- * Read-only, so it runs beside the controlling program. Start it in the
- * background: its end is what tells you something was found.
+ * It is submitted as work, so it replaces the running work; it only reads
+ * the world while it waits. Start it in the background: its end is what
+ * tells you something was found.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import { Vec3 } from "vec3";
 import { sampleNearbyConnectedBlocks } from "../game/observation/nearby-connected-blocks.mjs";
-
-// Read-only, but it watches for a while: run it as a task.
 
 export default async function watchSurroundings(bot, { args = [], signal }) {
   const target = args[0] ?? "chest";

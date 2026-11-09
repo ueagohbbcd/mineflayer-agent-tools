@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildBundle } from "../scripts/build-bundle.mjs";
+import { buildBundle, gameSkillWithGuide } from "../scripts/build-bundle.mjs";
 
 const bundle = fileURLToPath(
   new URL("../bundle/mineflayer-agent/", import.meta.url),
@@ -20,4 +20,9 @@ test("bundle/mineflayer-agent is up to date with skills/ (npm run build:bundle)"
   assert.deepEqual(written, [...files.keys()].sort());
   for (const [path, text] of files)
     assert.equal(await readFile(join(bundle, path), "utf8"), text, path);
+});
+
+test("skills/mineflayer-game/SKILL.md carries game/template/AGENTS.md (npm run build:bundle)", async () => {
+  const skill = fileURLToPath(new URL("../skills/mineflayer-game/SKILL.md", import.meta.url));
+  assert.equal(await readFile(skill, "utf8"), await gameSkillWithGuide());
 });

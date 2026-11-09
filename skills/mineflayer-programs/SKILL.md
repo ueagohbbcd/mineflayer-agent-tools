@@ -58,7 +58,7 @@ export default async function walkTo(bot, { signal, args }) {
 
 Remove every listener and timer a program adds (`bot.off`, `clearInterval`) before it returns; leftovers keep firing into the next program.
 
-In the game process (`mineflayer-game`), a task's second argument carries the `signal`, which aborts on `node game.mjs cancel`. main then also clears the Pathfinder goal, stops PvP, block collecting, digging and eating, and puts the walking-only movements back, but hands the character on only when your task has returned, so stop promptly. Functions passed to `ctx.cleanup(fn)` run when the task leaves; any other listener or timer is yours to remove.
+In the game process, a task gets this `signal` in its `ctx`; the task contract is in `mineflayer-game`.
 
 ## Sharing one bot
 
@@ -68,7 +68,7 @@ In the game process (`mineflayer-game`), a task's second argument carries the `s
 
 ## Watchdog
 
-In the game process, main's rule table already notices a character that holds movement keys without moving, repeated deaths and repeated NoPath, and main's watchdog worker notices a blocked event loop; their notices reach you through `wait`. Inside your own task, or without the game process, wrap a controller with the watchdog library to hear about a stuck bot, repeated failures or a blocked event loop and decide in code:
+In the game process, main's watchdog worker notices a blocked event loop and `wait` says so. Inside your own task, or without the game process, wrap a controller with the watchdog library to hear about a stuck bot, repeated failures or a blocked event loop and decide in code:
 
 ```js
 import { watchdog } from "mineflayer-world-memory/watchdog.mjs";

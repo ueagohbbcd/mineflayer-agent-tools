@@ -23,7 +23,7 @@ export const linkConfigs = Object.freeze([
   { name: "dig", settings: { canDig: true } },
 ]);
 
-/** Within one block of the target, like Pathfinder's GoalNear(range 1) in navigate.mjs. */
+/** Within one block of the target, like Pathfinder's GoalNear(range 1) in game/candidates/goto.mjs. */
 function arriveAt(t) {
   return {
     heuristic: (n) => Math.hypot(t.x - n.x, t.z - n.z) + Math.abs(t.y - n.y),

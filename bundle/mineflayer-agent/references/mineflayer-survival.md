@@ -16,10 +16,4 @@ Right-click a bed with `await bot.activateBlock(bedBlock)` from within about two
 
 ## In the game process
 
-- The `danger` observer records damage, risks near you (a swelling creeper, lit TNT, a projectile, something targeting you), hunger and air (`node report.mjs danger`); the serious ones also come to you as notices.
-- During a task, keeping the character alive is the task's job, plus whatever main does: in the template, a checkpoint (`ctx.checkpoint({ eat: 'pause' })`) lets main eat and restart the task, and a hostile mob hurting you below 12 health or your head stuck in a block makes main take over and end the work. Between tasks, main's idle fights back, gets out of blocks, stays at the water surface and eats.
-
-## Examples
-
-- [fight-target.mjs](../../../examples/fight-target.mjs): attacking a chosen entity with PvP.
-- [navigate-with-defense.mjs](../../../examples/navigate-with-defense.mjs): a trip that fights back and resumes.
+Fighting back, eating and getting out of blocks are main's services (`defend`, `eat`, `escape` in [services.mjs](../../../game/candidates/services.mjs)), built on mineflayer-pvp, mineflayer-auto-eat and mineflayer-tool. What they take over and when is in `mineflayer-game`. The `wait` report's 受伤 section names what hurt you (mob, suffocation, fall, drowning).

@@ -9,45 +9,54 @@ description: "Play Minecraft Java through a real Mineflayer bot, all in one skil
 
 You control a character through [Mineflayer](https://github.com/PrismarineJS/mineflayer), a Node.js bot. One process, `main.mjs`, holds the bot for as long as it runs. You write tasks (JavaScript modules) and hand them to it.
 
-**You cannot see the game.** Nothing shows you the world unless you look: read the `wait` report, run queries, draw maps and screenshots (below). Look before you act, and again when something does not go as planned.
+**You cannot see the game.** Nothing shows you the world unless you look: read the `wait` report, run queries, draw maps and screenshots. Look before you act, and again when something does not go as planned.
 
 ## Setup
 
-- Copy `<toolkit>/game/template/` into a project directory and install the toolkit there (`npm install <toolkit tarball> mineflayer mineflayer-pathfinder mineflayer-pvp mineflayer-auto-eat mineflayer-armor-manager mineflayer-tool mineflayer-collectblock vec3`). `<toolkit>` below means `node_modules/mineflayer-world-memory`.
-- Set `MF_HOST`, `MF_PORT`, `MF_USERNAME` (and `MF_VERSION=1.21.1` for 1.21.1), then start `node main.mjs` **with your tool's background mode**. A second `node main.mjs` in the same directory just says one is running.
-- `main.mjs` is yours: which services, idle behaviour and reports it uses are plain code. After editing it, `node game.mjs stop` and start it again (reconnecting is fine).
+- Copy all of `<toolkit>/game/template/` into a project directory, including `AGENTS.md` (your one page for playing; keep it where your tool reads it) and `tasks/`. Install the toolkit there: `npm install <toolkit tarball> mineflayer mineflayer-pathfinder mineflayer-pvp mineflayer-auto-eat mineflayer-armor-manager mineflayer-tool mineflayer-collectblock vec3`. `<toolkit>` below means `node_modules/mineflayer-world-memory`.
+- Set `MF_HOST`, `MF_PORT`, `MF_USERNAME` (and `MF_VERSION=1.21.1` for 1.21.1), then start `node main.mjs` **with your tool's background mode**.
+- Try it: `node game.mjs run tasks/example.mjs X Y Z` with coordinates a few blocks away, then `node game.mjs wait`.
+
+<!-- BEGIN player guide: generated from game/template/AGENTS.md by npm run build:bundle; edit that file. -->
 
 ## The work loop
 
-1. **Submit work in the background:** `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the work ends. Killing this command does not stop the work; `node game.mjs cancel` does. Submitting new work replaces the running one.
-2. **Read what happened:** `node game.mjs wait`. It returns with a report as soon as something happened: the work ended, you died, someone whispered or named you, a service took over. If something already happened while nobody was waiting, it returns at once. Otherwise it blocks, so run it in the background too, or in the foreground when you have nothing else to do.
-3. **Read the report even when the `run` output already told you the result.** The report also has your health, food, time until night, inventory changes, who is around and what hurt you.
+1. Start `node main.mjs` once, in the background. A second start in the same directory only says one is running.
+2. Submit work in the background: `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the work ends.
+3. Run `node game.mjs wait`. It returns with a report as soon as something happens (work ended, death, a takeover, a whisper or your name in chat), at once if something already happened.
+4. Read the report every time, even when `run` already printed the result: it also has health, food, time until night, inventory changes, who is around and what hurt you. Then decide and submit the next work.
 
-## Writing a task
+Killing the `run` command only stops its output; the work goes on. `node game.mjs cancel` ends it. New work replaces the running one.
+
+## The task contract
 
 ```js
-// tasks/go.mjs
 import { goto } from "mineflayer-world-memory/game/candidates/goto.mjs";
 
 export default async function task(bot, ctx) {
-  const [x, y, z] = ctx.args.map(Number);
-  ctx.log(`attempt ${ctx.attempt}`);                         // lines go into the result
-  await goto(bot, ctx, [x, y, z], { checks: { eat: "pause" } });
-  return bot.entity.position.floored();                     // the result
+  const [x, y, z] = ctx.args.map(Number); // the words after the file name
+  ctx.log("on my way");                   // a line in the run output and the result
+  await goto(bot, ctx, [x, y, z]);         // toolkit functions stop by themselves
+  if (ctx.signal.aborted) return;          // the exit rule, after your own awaits
+  return bot.entity.position.floored();    // the result
 }
 ```
 
-`ctx` has `args`, `log`, `signal`, `attempt`, `checkpoint(services)`, `cleanup(fn)`, `wake(reason)` and `takeover(service)`.
+- `ctx.args`, `ctx.log`, `ctx.signal` are all a task needs. `tasks/example.mjs` is a complete one.
+- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, new work, a takeover and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
+- The return value is the result; a thrown error is the failure, with its message.
+- A task that keeps going after the abort keeps the character: nothing else starts, and `wait` tells you main needs a restart.
 
-**Leaving when asked.** Cancelling, a service taking over, new work and death all ask the task to leave the same way: `ctx.signal` aborts, main stops Pathfinder, keys, digging, eating and open windows, and runs your `ctx.cleanup` functions. After an awaited call throws or returns, do not start more game actions once `ctx.signal.aborted` is true. A task that keeps running anyway keeps the character: nothing else starts, and `wait` tells you it needs a restart of main.
+## What ends work without you asking
 
-**Checkpoints.** `await ctx.checkpoint({ eat: "pause", defend: "stop" })` checks those services at that point. If one is needed, the task leaves and the service runs. `pause`: afterwards the task starts again **from the top** with `ctx.attempt` one higher, and the `run` command keeps following it; write the task so a fresh start continues from where the character is. `stop`: the work ends and idle takes over. The candidate `goto` checks every half second, so a task that only travels with it gets checkpoints for free.
+- **Death.** The work ends; idle starts after respawn. The report has where you died and where you respawned.
+- **Danger takeover.** A hostile mob hurting you below 12 health starts `defend`; your head stuck in a block starts `escape`. The work ends with the service's result.
 
-**Takeovers without a checkpoint.** main can stop the work itself: the template's danger check takes over with `defend` when a hostile mob hurts you below 12 health and with `escape` when your head is stuck in a block. The work then ends with the service's result.
+Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
-**Between tasks** main's idle loop keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats.
+## Between works
 
-Edits to a task file are picked up on the next run; modules it imports are cached until main restarts.
+Idle keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
 
 ## Commands
 
@@ -57,49 +66,59 @@ Edits to a task file are picked up on the next run; modules it imports are cache
 | `node game.mjs wait` | return with the report once something happened |
 | `node game.mjs cancel` | end the current work |
 | `node game.mjs query <file> [args]` | run a read-only module now, even during work (10 s; `GAME_QUERY_TIMEOUT`) |
-| `node game.mjs status` / `stop` | who controls the character, the current work / end main |
+| `node game.mjs status` | who controls the character, the current work |
+| `node game.mjs stop` | end main (start it again in the background) |
 | `node report.mjs [name] [minutes]` | what the recorders kept (`explore`, `radar`); reads files only |
 
-Results are also in `.game/results/`, records in `records/*.jsonl`.
+## Where to look
+
+In this order, as far as you need:
+
+1. The `wait` report.
+2. A full sample now: `node game.mjs query <toolkit>/game/queries/snapshot.mjs` (you, inventory, entities, the four directions).
+3. A query of your own for exact facts, e.g. `export default async (bot) => bot.blockAt(bot.entity.position.offset(0, -1, 0))?.name`. Check the target cell right before you act.
+4. A map or a picture: `<toolkit>/examples/reach-map.mjs` (where you can walk), `<toolkit>/examples/screenshot.mjs` (a box from corners or above).
+
+## main.mjs is yours
+
+Which services, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
+
+<!-- END player guide -->
+
+## Advanced: checkpoints and restarts
+
+Optional. By default a takeover or a failed check ends the work and you decide what next. A task can instead offer checkpoints where a service may step in and the task then starts again:
+
+- `await ctx.checkpoint({ eat: "pause", defend: "stop" })` checks those services at that point. If one is needed, the task leaves and the service runs. `pause`: afterwards the task starts again **from the top** with `ctx.attempt` one higher, and the `run` command keeps following it. `stop`: the work ends and idle takes over.
+- `goto(bot, ctx, xyz, { checks: { eat: "pause" } })` offers that checkpoint every half second.
+- Write a restartable task so a fresh start continues from where the character is: read the inventory and position first, skip what is already done.
+- Other `ctx` members: `ctx.cleanup(fn)` runs `fn` when the task leaves (for listeners and timers you add); `ctx.wake(reason)` makes `wait` return without ending the task; `ctx.takeover(name, { mode, reason })` hands over to a service yourself.
 
 ## Library and candidates
 
-- Plugins main loads: `mineflayer-pathfinder`, `mineflayer-pvp` (`bot.pvp`), `mineflayer-auto-eat` (`bot.autoEat`, automatic eating off), `mineflayer-armor-manager`, `mineflayer-tool` (`bot.tool`), `mineflayer-collectblock` (`bot.collectBlock`). Use them in tasks instead of writing your own fighting, eating or collecting. Pathfinder walks without digging by default; a task that needs digging sets its own movements, and they go back to walking-only when it leaves.
-- `<toolkit>/game/index.mjs`: what main is built from (host, reports, damage types, chat, walking-only Pathfinder movements, the crafting fix, `oxygenOf(bot)`).
-- `<toolkit>/game/candidates/`: control logic that is still being tried (services, idle, danger takeover, `goto`, `craftChecked`). Use it, copy it, change it; its README says what has been checked on a server.
+- Plugins main loads (`game/lib/plugins.mjs`): `mineflayer-pathfinder`, `mineflayer-pvp` (`bot.pvp`), `mineflayer-auto-eat` (`bot.autoEat`, automatic eating off), `mineflayer-armor-manager`, `mineflayer-tool` (`bot.tool`), `mineflayer-collectblock` (`bot.collectBlock`). Use them in tasks instead of writing your own fighting, eating or collecting. Pathfinder walks without digging by default; a task that needs digging sets its own movements, and they go back to walking-only when it leaves.
+- `<toolkit>/game/index.mjs`: what main is built from (host, reports, damage types, chat, plugins, the crafting fix, `oxygenOf(bot)`).
+- `<toolkit>/game/candidates/`: control logic that is still being tried: `goto` (travel), `craftChecked` (craft and check the count), the services `defend`, `escape`, `eat`, idle and the danger takeover. Use it, copy it, change it; its README says what has been checked on a server.
 
-## Looking at the world
+## More ways to look
 
-Standard ways to look, from cheap to rich:
-
-- The `wait` report: your state, who is around, what hurt you, chat.
-- `node game.mjs query <toolkit>/game/queries/snapshot.mjs`: one full sample now (you, inventory, nearby entities, what is around you in four directions).
-- A query of your own for exact facts: `export default async (bot) => bot.blockAt(bot.entity.position.offset(0, -1, 0))?.name`. Check the target cell and what stands in it right before you act, not from what you saw a while ago.
-- `node game.mjs query <toolkit>/examples/reach-map.mjs`: where you can walk from here and back, as a text map.
 - `node game.mjs query <toolkit>/examples/screenshot.mjs [minX minY minZ maxX maxY maxZ] [views] [solid|open|game] [grid]`: a picture of a box, from corners or above; `pick.mjs IMAGE X Y` turns pixels into block coordinates. Use it when shape decides: doorways, walls, stacked floors.
-- `notes/`: write down places, coordinates, how they connect and what it takes to get through; reread before long trips.
+- If you keep needing something none of the standard ways shows, write a query, or add a report function to main (`host.addReport(name, () => text)`).
 
-When to look: before a task that depends on the surroundings, after a task fails or ends somewhere unexpected, and whenever `wait` returns. These are only the standard ways: if you keep needing something none of them shows, write a query, or add a report function to main (`host.addReport(name, () => text)`).
+## Examples
 
-## Example tasks and queries
-
-`<toolkit>/examples/` holds modules that each show one way to do something. Run one as it is (`node game.mjs run <toolkit>/examples/navigate.mjs X Y Z`; read-only ones with `query`), import it from your own task, or copy and change it. Their first comment says how to call them.
+`<toolkit>/examples/` holds modules that each show one way to do something. Run one as it is (read-only ones with `query`), import it from your own task, or copy and change it. Their first comment says how to call them.
 
 | Example | Shows |
 | --- | --- |
-| [navigate.mjs](../../examples/navigate.mjs) | A Pathfinder trip that ends when it arrives, fails or stalls (checks it really arrived). |
-| [navigate-with-defense.mjs](../../examples/navigate-with-defense.mjs) | A trip with a small close-range defense. |
-| [navigate-with-autoeat.mjs](../../examples/navigate-with-autoeat.mjs) | A trip that eats on the way and resumes. |
-| [fight-target.mjs](../../examples/fight-target.mjs) | Attacking a chosen entity with PvP. |
-| [build-with-autoeat.mjs](../../examples/build-with-autoeat.mjs) | Placing a planned list of blocks, eating between steps. |
-| [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs) | Whether an entity blocks a placement (query). |
-| [reach-map.mjs](../../examples/reach-map.mjs) | Where you can walk from here and back (query). |
-| [profile.mjs](../../examples/profile.mjs) | The ground along a line: walls, drops, water (query). |
-| [place-graph.mjs](../../examples/place-graph.mjs) | Which of your waypoints connect, and how (query). |
-| [summarize-terrain.mjs](../../examples/summarize-terrain.mjs) | Local terrain and connectivity as numbers (query). |
-| [screenshot.mjs](../../examples/screenshot.mjs), [pick.mjs](../../examples/pick.mjs) | Pictures of a box; pixels to blocks (queries). |
+| [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs) | Whether an entity blocks a placement. |
+| [reach-map.mjs](../../examples/reach-map.mjs) | Where you can walk from here and back. |
+| [profile.mjs](../../examples/profile.mjs) | The ground along a line: walls, drops, water. |
+| [place-graph.mjs](../../examples/place-graph.mjs) | Which of your waypoints connect, and how. |
+| [summarize-terrain.mjs](../../examples/summarize-terrain.mjs) | Local terrain and connectivity as numbers. |
+| [screenshot.mjs](../../examples/screenshot.mjs), [pick.mjs](../../examples/pick.mjs) | Pictures of a box; pixels to blocks. |
 | [watch-surroundings.mjs](../../examples/watch-surroundings.mjs) | Waiting until a kind of block shows up nearby. |
-| [query-block-memory.mjs](../../examples/query-block-memory.mjs) | One block, live first, history only for unloaded chunks (query). |
+| [query-block-memory.mjs](../../examples/query-block-memory.mjs) | One block, live first, history only for unloaded chunks. |
 
 ## Guides
 
@@ -109,4 +128,4 @@ Read the one you need when you need it:
 - **Getting around** ([mineflayer-navigation](references/mineflayer-navigation.md)): move with Pathfinder, setting `Movements` for what a path may do (digging, towers, parkour, drops). After `NoPath` or a stall, look before retrying the same goal. Before using the hand, wait until Pathfinder has really stopped. Keep a few waypoints for places you come back to.
 - **Looking at the world** ([mineflayer-surroundings](references/mineflayer-surroundings.md)): the bot knows only the chunks the server sent, and unknown is not air. Read blocks live first, with history only for unloaded chunks. Entities, players and signs, pictures when shape matters, one tree's logs, and the radar and explore observers.
 - **Items and containers** ([mineflayer-items](references/mineflayer-items.md)): dig with the right tool, place against a face with no entity in the cell, and equip again each time work resumes. Craft with the right number of runs. Take only what you need from a chest, using the numeric item type.
-- **Staying alive** ([mineflayer-survival](references/mineflayer-survival.md)): eat before health drops, fight with PvP, and defend while walking. Get out of water and check below before digging. Use a bed only in the overworld. In the game process, the danger observer, the low-air rule and idle help.
+- **Staying alive** ([mineflayer-survival](references/mineflayer-survival.md)): eat before health drops, fight with PvP, and defend while walking. Get out of water and check below before digging. Use a bed only in the overworld. In the game process, main's services and idle fight back, eat and get you out of blocks.
