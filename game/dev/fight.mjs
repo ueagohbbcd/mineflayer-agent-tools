@@ -8,8 +8,10 @@
 //   mob: skeleton | spider | zombie2 | creeper
 //
 // Arena (SCENARIOS.md): stone floor y=120, x -51..29, z -206..-126, glass
-// walls, noon, no daylight cycle. The bot starts at A, mobs are summoned 12
-// blocks east of A; in goto mode the bot walks A → B → A (patrol.mjs, 2 legs).
+// walls. Each run sets midnight, no daylight cycle and no natural spawning
+// (undead do not burn, spiders attack, no other mobs join). The bot starts at
+// A, mobs are summoned 12 blocks east of A; in goto mode the bot walks
+// A → B → A … (patrol.mjs, FIGHT_LEGS legs, default 6, about 70 blocks each).
 // Each run appends one JSON line to fight-results.jsonl and saves the `wait`
 // report after the run to fight-reports.log.
 import fs from 'node:fs'
@@ -23,14 +25,15 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
 const NAME = process.env.MF_USERNAME ?? 'Scen'
 const [mob, mode = 'idle', runsArg = '3', sword = 'iron_sword', healthArg = '20'] = process.argv.slice(2)
+const LEGS = Number(process.env.FIGHT_LEGS ?? 6) // patrol legs in goto mode
 const A = [-46.5, 121, -165.5]
 const B = [24, 121, -166]
-const HELMET = '{PersistenceRequired:1b,ArmorItems:[{},{},{},{id:"minecraft:leather_helmet",count:1}]}'
+const KEEP = '{PersistenceRequired:1b}'
 const MOBS = {
-  skeleton: { type: 'skeleton', summon: [`summon skeleton -34.5 121 -165.5 ${HELMET}`] },
-  spider: { type: 'spider', summon: ['summon spider -34.5 121 -165.5 {PersistenceRequired:1b}'] },
-  zombie2: { type: 'zombie', summon: [`summon zombie -34.5 121 -167.5 ${HELMET}`, `summon zombie -34.5 121 -163.5 ${HELMET}`] },
-  creeper: { type: 'creeper', summon: ['summon creeper -34.5 121 -165.5 {PersistenceRequired:1b}'] }
+  skeleton: { type: 'skeleton', summon: [`summon skeleton -34.5 121 -165.5 ${KEEP}`] },
+  spider: { type: 'spider', summon: [`summon spider -34.5 121 -165.5 ${KEEP}`] },
+  zombie2: { type: 'zombie', summon: [`summon zombie -34.5 121 -167.5 ${KEEP}`, `summon zombie -34.5 121 -163.5 ${KEEP}`] },
+  creeper: { type: 'creeper', summon: [`summon creeper -34.5 121 -165.5 ${KEEP}`] }
 }
 if (!MOBS[mob] || !['goto', 'idle'].includes(mode)) {
   console.log('用法：node fight.mjs <skeleton|spider|zombie2|creeper> <goto|idle> [runs] [sword] [health]')
@@ -77,16 +80,17 @@ for (let run = 1; run <= Number(runsArg); run++) {
   const s0 = await status()
   if (s0.job?.status === 'running') await request({ type: 'cancel' })
   await waitUntil(async () => (await status()).alive, 30000)
-  await rcon([`kill @e[type=!player,${ARENA}]`, `tp ${NAME} ${A.join(' ')} -90 0`, `clear ${NAME}`, `effect clear ${NAME}`,
+  await rcon(['time set 18000', 'gamerule doDaylightCycle false', 'gamerule doMobSpawning false', 'gamerule mobGriefing false', 'kill @e[type=!player]', `tp ${NAME} ${A.join(' ')} -90 0`, `clear ${NAME}`, `effect clear ${NAME}`,
     `give ${NAME} ${sword}`, `effect give ${NAME} instant_health 1 5`, `effect give ${NAME} saturation 2 10`])
   await sleep(2500)
   const target = Number(healthArg)
   if (target < 20) { await rcon([`damage ${NAME} ${20 - target} minecraft:generic`]); await sleep(1000) }
-  await request({ type: 'wait' }) // take what the set-up woke, so the report after the run is about the fight
+  // Take what the set-up or the last run woke, so the report after the run is about the fight.
+  if ((await status()).pending) await request({ type: 'wait' })
   let runMsgs = []
   let jobEnd = null
   if (mode === 'goto') {
-    request({ type: 'run', file: path.join(dir, 'tasks/patrol.mjs'), args: [...A, ...B, '2'].map(String) }, m => {
+    request({ type: 'run', file: path.join(dir, 'tasks/patrol.mjs'), args: [...A, ...B, LEGS].map(String) }, m => {
       if (m.type === 'log' || m.type === 'event') runMsgs.push(m.line ?? m.text)
       if (m.type === 'result') jobEnd = m.summary.end
     })
@@ -98,12 +102,13 @@ for (let run = 1; run <= Number(runsArg); run++) {
   await rcon(MOBS[mob].summon)
   const t0 = Date.now()
   const seen = []
+  const acts = [] // what the bot was doing, sample by sample: pvp target, a Pathfinder goal
   let hmin = v0.health
   let maxDist = 0
   let died = false
   let calmSince = null
   let samples = 0
-  while (Date.now() - t0 < 90000) {
+  while (Date.now() - t0 < 150000) {
     await sleep(500)
     const s = await status()
     const ctrl = s.controller ? `${s.controller.kind}:${s.controller.name}${s.controller.phase !== 'running' ? `(${s.controller.phase})` : ''}` : 'none'
@@ -111,6 +116,8 @@ for (let run = 1; run <= Number(runsArg); run++) {
     if (!s.alive) { died = true; break }
     const v = await vitals()
     if (!v) continue
+    const act = `${ctrl}${v.pvpTarget ? ' pvp' : ''}${v.goal ? ' goal' : ''}`
+    if (acts.at(-1) !== act) acts.push(act)
     samples++
     hmin = Math.min(hmin, v.health)
     maxDist = Math.max(maxDist, dist(v.position, start))
@@ -124,16 +131,17 @@ for (let run = 1; run <= Number(runsArg); run++) {
   const left = await mobCount()
   if (died) await waitUntil(async () => (await status()).alive, 30000)
   await sleep(1000)
-  const report = (await request({ type: 'wait' }))?.text ?? ''
+  // Only when something woke: a wait with nothing pending would block.
+  const report = (await status()).pending ? (await request({ type: 'wait' }))?.text ?? '' : '（这一轮没有唤醒）'
   const row = {
-    at: new Date().toISOString(), mob, mode, sword, run,
+    at: new Date().toISOString(), mob, mode, sword, run, legs: mode === 'goto' ? LEGS : undefined,
     healthStart: r1(v0.health), healthMin: r1(hmin), healthEnd: v1 ? r1(v1.health) : 0, died,
     mobsLeft: left, seconds, maxDistFromStart: r1(maxDist), endDistFromStart: v1 ? r1(dist(v1.position, start)) : null,
-    controllers: seen, jobEnd: jobEnd ?? (mode === 'goto' ? '跑完时仍在进行' : null), runLines: runMsgs.filter(l => l.startsWith('[')).slice(0, 6), samples
+    controllers: seen, acts, mobsKilled: MOBS[mob].summon.length - left, jobEnd: jobEnd ?? (mode === 'goto' ? '跑完时仍在进行' : null), runLines: runMsgs.filter(l => l.startsWith('[')).slice(0, 6), samples
   }
   fs.appendFileSync(path.join(dir, 'fight-results.jsonl'), JSON.stringify(row) + '\n')
   fs.appendFileSync(path.join(dir, 'fight-reports.log'), `\n===== ${row.at} ${mob} ${mode} ${sword} ${healthArg} run ${run}\n${report}\n`)
   console.log(JSON.stringify(row))
 }
-await rcon([`kill @e[type=!player,${ARENA}]`])
+await rcon(['kill @e[type=!player]'])
 process.exit(0)

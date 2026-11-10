@@ -6,6 +6,7 @@ export default async function query (bot) {
     food: bot.food,
     position: [p.x, p.y, p.z],
     held: bot.heldItem?.name ?? null,
-    pvpTarget: bot.pvp?.target?.name ?? null
+    pvpTarget: bot.pvp?.target?.name ?? null,
+    goal: bot.pathfinder?.goal ? bot.pathfinder.goal.constructor.name : null
   }
 }
