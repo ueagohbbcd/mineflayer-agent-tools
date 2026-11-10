@@ -77,6 +77,12 @@ In this order, as far as you need:
 3. A query of your own for exact facts, e.g. `export default async (bot) => bot.blockAt(bot.entity.position.offset(0, -1, 0))?.name`. Check the target cell right before you act.
 4. A map or a picture: `<toolkit>/examples/reach-map.mjs` (where you can walk), `<toolkit>/examples/screenshot.mjs` (a box from corners or above).
 
+## Reminders
+
+- Pathfinding walks only. After digging down, a job that walks back out fails with no path: dig stairs or pillar up in the task, or allow digging in that task's movements.
+- Nothing preempts a job for drowning or a breaking tool: check air and the held tool in tasks that mine, especially near water.
+- If `wait` or `status` says main is not running, it crashed: start it again and look at its log.
+
 ## main.mjs is yours
 
 Which reflexes, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
