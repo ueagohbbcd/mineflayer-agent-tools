@@ -22,7 +22,7 @@ returns a live block first; only previously received *unloaded* chunks may
 supply historical (potentially stale) fallback. Pass `null` for memory to
 operate without any history collection.
 
-See [project scope](docs/project-scope.md), the [principles](docs/principles.md) behind the design and the [lessons](docs/lessons.md) they come from.
+See the [architecture](docs/architecture.md) for what each place does, [project scope](docs/project-scope.md), how the toolkit [improves through play](docs/self-iteration.md), the [principles](docs/principles.md) behind the design and the [lessons](docs/lessons.md) they come from.
 
 To let an agent play through Mineflayer, start from [`game/`](game/README.md):
 copy `game/template/` into a project, run `node main.mjs` in the background

@@ -1,6 +1,6 @@
 # game：一个进程持有角色
 
-设计见项目文件 `plans/minecraft-toolkit-minimal-design.md`。核心只做五件事：连接并运行任务文件；任务、反射、idle 之间按顺序交接；Unix socket 通信；唤醒（没有 wait 时保存标记）；wait 返回时拼接已注册的报告函数。
+整体结构见 [docs/architecture.md](../docs/architecture.md)，设计理由见 [docs/principles.md](../docs/principles.md)。核心只做五件事：连接并运行任务文件；任务、反射、idle 之间按顺序交接；Unix socket 通信；唤醒（没有 wait 时保存标记）；wait 返回时拼接已注册的报告函数。
 
 ## 用词
 

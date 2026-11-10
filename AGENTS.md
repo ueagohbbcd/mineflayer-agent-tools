@@ -28,6 +28,8 @@ Each kind of text has one job. Write a thing once, in the place that owns it, an
 
 | Text | Job | Read by |
 | --- | --- | --- |
+| [docs/architecture.md](docs/architecture.md) | The whole picture: what runs at play time, the life of a job, what each place in the repository does, where to go to change a thing; read first | contributors |
+| [docs/self-iteration.md](docs/self-iteration.md) | How the toolkit improves through play: the two loops, where each output goes and when it takes effect, how to tell it helped | contributors |
 | [docs/principles.md](docs/principles.md) | Why the toolkit is shaped this way; read before changing a design, update when a trade-off is decided | contributors |
 | [docs/lessons.md](docs/lessons.md) | What was observed, the evidence, what is done about it; open questions at the end | contributors |
 | [docs/project-scope.md](docs/project-scope.md) | What belongs in this repository and what stays outside | contributors |
