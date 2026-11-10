@@ -1,11 +1,13 @@
-// Staged fights in the arena for game/dev/SCENARIOS.md (scenario 13). Run it
+// Staged fights in the arena for game/dev/SCENARIOS.md (part 2). Run it
 // in the test project directory while main is running there. It sets each run
 // up with RCON, then only watches: every 0.5 s it reads status and the vitals
 // query through the socket and counts the mobs with RCON. What it prints is
 // what it saw; it decides nothing for the bot.
 //
 //   node <toolkit>/game/dev/fight.mjs <mob> <goto|idle> [runs=3] [sword=iron_sword] [health=20]
-//   mob: skeleton | spider | zombie2 | creeper
+//   mob: skeleton | spider | zombie | zombie2 | creeper
+//   FIGHT_NO_REGEN=1: gamerule naturalRegeneration false for the run, so a
+//   low starting health stays low until the fight (default: regeneration on)
 //
 // Arena (SCENARIOS.md): stone floor y=120, x -51..29, z -206..-126, glass
 // walls. Each run sets midnight, no daylight cycle and no natural spawning
@@ -31,12 +33,13 @@ const B = [24, 121, -166]
 const KEEP = '{PersistenceRequired:1b}'
 const MOBS = {
   skeleton: { type: 'skeleton', summon: [`summon skeleton -34.5 121 -165.5 ${KEEP}`] },
+  zombie: { type: 'zombie', summon: [`summon zombie -34.5 121 -165.5 ${KEEP}`] },
   spider: { type: 'spider', summon: [`summon spider -34.5 121 -165.5 ${KEEP}`] },
   zombie2: { type: 'zombie', summon: [`summon zombie -34.5 121 -167.5 ${KEEP}`, `summon zombie -34.5 121 -163.5 ${KEEP}`] },
   creeper: { type: 'creeper', summon: [`summon creeper -34.5 121 -165.5 ${KEEP}`] }
 }
 if (!MOBS[mob] || !['goto', 'idle'].includes(mode)) {
-  console.log('用法：node fight.mjs <skeleton|spider|zombie2|creeper> <goto|idle> [runs] [sword] [health]')
+  console.log('用法：node fight.mjs <skeleton|spider|zombie|zombie2|creeper> <goto|idle> [runs] [sword] [health]')
   process.exit(1)
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -66,6 +69,10 @@ const vitals = async () => (await request({ type: 'query', file: path.join(here,
 // Only the arena: other loaded chunks have their own mobs.
 const ARENA = 'x=-51,y=118,z=-206,dx=80,dy=12,dz=80'
 const mobCount = async () => Number((await rcon([`execute if entity @e[type=${MOBS[mob].type},${ARENA}]`]))[0].match(/count: (\d+)/)?.[1] ?? 0)
+// Deaths from the server's deathCount score: the bot respawns at once, so a
+// death between two status samples would otherwise go unseen.
+const deaths = async () => Number((await rcon([`scoreboard players get ${NAME} fightDeaths`]))[0].match(/has (\d+)/)?.[1] ?? 0)
+await rcon(['scoreboard objectives add fightDeaths deathCount'])
 const dist = (p, q) => Math.hypot(p[0] - q[0], p[2] - q[2])
 const r1 = n => Math.round(n * 10) / 10
 
@@ -80,7 +87,7 @@ for (let run = 1; run <= Number(runsArg); run++) {
   const s0 = await status()
   if (s0.job?.status === 'running') await request({ type: 'cancel' })
   await waitUntil(async () => (await status()).alive, 30000)
-  await rcon(['time set 18000', 'gamerule doDaylightCycle false', 'gamerule doMobSpawning false', 'gamerule mobGriefing false', 'kill @e[type=!player]', `tp ${NAME} ${A.join(' ')} -90 0`, `clear ${NAME}`, `effect clear ${NAME}`,
+  await rcon(['time set 18000', 'gamerule doDaylightCycle false', 'gamerule doMobSpawning false', 'gamerule mobGriefing false', `gamerule naturalRegeneration ${process.env.FIGHT_NO_REGEN ? 'false' : 'true'}`, 'kill @e[type=!player]', `tp ${NAME} ${A.join(' ')} -90 0`, `clear ${NAME}`, `effect clear ${NAME}`,
     `give ${NAME} ${sword}`, `effect give ${NAME} instant_health 1 5`, `effect give ${NAME} saturation 2 10`])
   await sleep(2500)
   const target = Number(healthArg)
@@ -98,6 +105,7 @@ for (let run = 1; run <= Number(runsArg); run++) {
   }
   // ---- fight ----
   const v0 = await vitals()
+  const deaths0 = await deaths()
   const start = v0.position
   await rcon(MOBS[mob].summon)
   const t0 = Date.now()
@@ -113,7 +121,7 @@ for (let run = 1; run <= Number(runsArg); run++) {
     const s = await status()
     const ctrl = s.controller ? `${s.controller.kind}:${s.controller.name}${s.controller.phase !== 'running' ? `(${s.controller.phase})` : ''}` : 'none'
     if (seen.at(-1) !== ctrl) seen.push(ctrl)
-    if (!s.alive) { died = true; break }
+    if (!s.alive || await deaths() > deaths0) { died = true; break }
     const v = await vitals()
     if (!v) continue
     const act = `${ctrl}${v.pvpTarget ? ' pvp' : ''}${v.goal ? ' goal' : ''}`
@@ -143,5 +151,5 @@ for (let run = 1; run <= Number(runsArg); run++) {
   fs.appendFileSync(path.join(dir, 'fight-reports.log'), `\n===== ${row.at} ${mob} ${mode} ${sword} ${healthArg} run ${run}\n${report}\n`)
   console.log(JSON.stringify(row))
 }
-await rcon(['kill @e[type=!player]'])
+await rcon(['kill @e[type=!player]', 'gamerule naturalRegeneration true'])
 process.exit(0)

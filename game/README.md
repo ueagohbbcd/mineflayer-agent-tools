@@ -34,7 +34,7 @@
 | `template/` | 玩家项目的起点：`AGENTS.md`（玩家的一页说明，任务约定的唯一来源，`npm run build:bundle` 把它生成进 `skills/mineflayer-game/SKILL.md`）、`main.mjs`（可编辑；调用 `loadPlugins`，把 `stopGameActions` 作为清理传给核心）、`tasks/example.mjs`、`game.mjs`、`report.mjs` |
 | `bin/game.mjs` | `run`、`wait`、`cancel`、`query`、`status`、`stop` |
 | `observation/`、`queries/`、`visual/` | 只读观察函数、快照查询、截图渲染器 |
-| `dev/` | 本地验证：RCON、场地、测试任务 |
+| `dev/` | 本地验证：RCON、场地、测试任务、战斗和夜里的观察脚本（`fight.mjs`、`night.mjs`）；场景清单 [dev/SCENARIOS.md](dev/SCENARIOS.md) |
 
 ## 约定
 
