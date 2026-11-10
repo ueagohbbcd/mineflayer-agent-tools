@@ -5,12 +5,22 @@ For contributors to this repository. Agents that play through it read `game/temp
 ## Two layers
 
 - **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `game/`, never notify a model, and take a callback for anything they report.
-- **Game** (`game/`): one process that holds the bot (`template/main.mjs`). The core (`lib/host.mjs`, `lib/server.mjs`) is kept small and game-agnostic: run task files, hand control between task, service and idle through one exit flow, a Unix socket for run/cancel/wait/query/status, a wake flag, and report functions joined when `wait` returns. A task that does not exit keeps the bot; the fallback is restarting the process, never wrapping the bot. Plugin quirks live in `game/lib/plugins.mjs`. The player's page is `game/template/AGENTS.md`; it is the one source of the task contract, and `npm run build:bundle` copies it into `skills/mineflayer-game/SKILL.md`. Telling a model when a background command ends is the harness's job.
-- **Candidates** (`game/candidates/`): control logic found useful in tests or play (services, idle, danger takeover, `goto`, `craftChecked`). It stays there, marked in its README with what was checked on a server, until it has earned a place as a routine. Lessons for playing go into skills more freely.
+- **Game** (`game/`): one process that holds the bot (`template/main.mjs`). The core (`lib/host.mjs`, `lib/server.mjs`) is kept small and game-agnostic: run task files as jobs, hand control between task, reflex and idle through one exit flow, a Unix socket for run/cancel/wait/query/status (binding it is what keeps one main per project), a wake flag, and report functions joined when `wait` returns. A task that does not exit keeps the bot; the fallback is restarting the process, never wrapping the bot. Plugin quirks live in `game/lib/plugins.mjs`. The player's page is `game/template/AGENTS.md`; it is the one source of the task contract, and `npm run build:bundle` copies it into `skills/mineflayer-game/SKILL.md`. Telling a model when a background command ends is left to the harness.
+- **Experimental** (`game/experimental/`): control logic found useful in tests or play (reflexes, idle, the danger observer that preempts, `goto`, `craftChecked`). It stays there, marked in its README with what was checked on a server, until it has earned a place as a routine. Lessons for playing go into skills more freely.
 
 Example programs (`examples/*.mjs`) sit on top of both: short task/query modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique. One way per thing: a second way enters only with server evidence that it is better for some case. Their tests are in `test/examples/`.
 
 Scope and what not to build: [docs/project-scope.md](docs/project-scope.md).
+
+## Vocabulary
+
+The game's terms come from OS job control; code, docs and messages use only these ([game/README.md](game/README.md) has the full table):
+
+- **job** (作业): what the model submits with `run` and follows to its end across restarts, like a shell job; one run of its task file is an **attempt**.
+- **reflex** (反射): a short emergency behaviour that takes the bot (`defend`, `escape`, `eat`), like an interrupt handler.
+- **preempt** (抢占): a reflex taking the bot from the running controller, like a scheduler preempting a process; `then: 'restart' | 'end'` says what follows.
+- **safepoint** (安全点): a point where a task offers to be preempted, like a runtime safepoint.
+- **observer** (观察器), **report** (报告函数), **experimental** (试验): the parts wired in `main.mjs` that listen and record, the functions `wait` joins, and control logic still on trial, like a kernel's staging area.
 
 ## Document map
 
@@ -23,9 +33,9 @@ Each kind of text has one job. Write a thing once, in the place that owns it, an
 | [docs/project-scope.md](docs/project-scope.md) | What belongs in this repository and what stays outside | contributors |
 | This file | How to work on the repository: layers, document map, checks | contributors |
 | [game/README.md](game/README.md) | How the game process is built: files, conventions, tests | contributors |
-| [game/candidates/README.md](game/candidates/README.md) | Each candidate and its server record (scenario, result, how many runs) | contributors, playing agents |
+| [game/experimental/README.md](game/experimental/README.md) | Each piece of experimental code and its server record (scenario, result, how many runs) | contributors, playing agents |
 | Module READMEs and `docs/*.md` for the libraries | One module each: what it does, how to call it, where its data lives, limits | contributors, playing agents |
-| [game/template/AGENTS.md](game/template/AGENTS.md) | The player's one page: work loop, task contract, commands, one-line reminders | playing agents, always in context |
+| [game/template/AGENTS.md](game/template/AGENTS.md) | The player's one page: job loop, task contract, commands, one-line reminders | playing agents, always in context |
 | `skills/*/SKILL.md` | Subject knowledge an agent looks up for what it is doing now | playing agents, on demand |
 | `notes/` in a player project | That world's goal, places, structures, attempts | the playing agent itself |
 
@@ -33,7 +43,7 @@ Where a new piece of knowledge goes:
 
 - A one-line reminder for play ("before X, check Y") → `game/template/AGENTS.md`.
 - Subject knowledge with real body (several steps, code, a tool) → the skill of that subject.
-- Something a plugin or Minecraft version does unexpectedly → a comment at the fix, a row in the candidates record if it was seen on a server, and an entry in `docs/lessons.md`.
+- Something a plugin or Minecraft version does unexpectedly → a comment at the fix, a row in the experimental record if it was seen on a server, and an entry in `docs/lessons.md`.
 - A decided trade-off → `docs/principles.md`; the observation behind it → `docs/lessons.md`.
 - A server check → the record table next to the code, with the number of runs.
 - Something still undecided → the open list at the end of `docs/lessons.md`.

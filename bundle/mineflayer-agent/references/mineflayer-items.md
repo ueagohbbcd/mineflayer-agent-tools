@@ -5,7 +5,7 @@
 - **Dig:** `await bot.dig(block)`. Check `bot.canDigBlock(block)` and equip a suitable tool first: `await bot.tool.equipForBlock(block)` with `mineflayer-tool` (loaded by the game template), or `bot.pathfinder.bestHarvestTool(block)`. Check below before digging down.
 - **Collect blocks:** `await bot.collectBlock.collect(blocks)` (`mineflayer-collectblock`) walks to each block, digs it with the right tool and picks up the drop. It only breaks blocks the current Pathfinder movements may dig, and the game template walks without digging, so set digging movements in the task first: `bot.pathfinder.setMovements(new Movements(bot))`. When the task leaves, main puts walking-only back.
 - **Place:** `await bot.placeBlock(referenceBlock, faceVector)` places against a face of an existing block. Make sure no entity (including you) stands in the target cell.
-- **Equip:** `await bot.equip(item, "hand")`. The main hand is shared by every program on the bot; equip the right item again each time work resumes, because an eating or fighting program may have changed it.
+- **Equip:** `await bot.equip(item, "hand")`. The main hand is shared by every program on the bot; equip the right item again each time a program resumes, because an eating or fighting program may have changed it.
 - **Craft:** `bot.recipesFor(itemType, metadata, minResultCount, table)` lists recipes the current inventory can make; `await bot.craft(recipe, runs, table)` makes them. `runs` counts recipe executions, so use `Math.ceil(wanted / recipe.result.count)`. Pass `null` as `table` for 2×2 recipes; otherwise stand near a crafting table and pass its block. On 1.21.1, crafts in a row leave items in the 2×2 grid and later crafts silently produce nothing until a reconnect; the game template's `fixCrafting(bot)` clears the grid after every `bot.craft`. Without it, close the window and shift-click grid slots 1–4 back after each craft, and check the count rose.
 - **Furnaces, anvils, enchanting tables, villagers:** `openFurnace`, `openAnvil`, `openEnchantmentTable`, `openVillager`. A furnace's `fuel` and `progress` update over time; read them again after waiting.
 
@@ -20,5 +20,5 @@ If you look in one program and take in the next, check that `bot.currentWindow` 
 
 ## Examples
 
-- [craft.mjs](../../../game/candidates/craft.mjs): `craftChecked`, crafting by name and checking the count rose.
+- [craft.mjs](../../../game/experimental/craft.mjs): `craftChecked`, crafting by name and checking the count rose.
 - [inspect-placement-entities.mjs](../../../examples/inspect-placement-entities.mjs): checking that no entity blocks a placement (read-only).

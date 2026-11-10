@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Candidate material (not a routine): the old danger observer. Detects risk
+// Experimental material (not a routine): the old danger observer. Detects risk
 // signs (lit TNT, swelling creeper, moving projectile, a mob targeting you,
 // big or repeated health loss) and posts them through a `log` such as
 // observers/record.mjs. Kept for its detection logic.

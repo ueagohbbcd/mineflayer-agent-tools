@@ -20,7 +20,7 @@ timestamps, and the async-storage vs synchronous-query contract.
 `game/` lets any agent with a shell play through a real Mineflayer bot: one
 process (`main.mjs`, edited by the agent) holds the bot; tasks and read-only
 queries are submitted to it through a local socket; one controller at a time
-(the task, a service that took over, or idle) with one exit flow between them;
+(the task, a reflex that preempted it, or idle) with one exit flow between them;
 `wait` returns with the registered reports once something woke it; recorders
 write `records/`. Running commands in the
 background and telling the model when they end is left to the harness. It

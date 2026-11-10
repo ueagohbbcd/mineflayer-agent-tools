@@ -27,7 +27,7 @@ See [project scope](docs/project-scope.md), the [principles](docs/principles.md)
 To let an agent play through Mineflayer, start from [`game/`](game/README.md):
 copy `game/template/` into a project, run `node main.mjs` in the background
 (it holds the bot), and drive it with `node game.mjs run|wait|cancel|query|status|stop`
-(`run` follows a piece of work to its end; `wait` returns with a report once
+(`run` follows a job to its end; `wait` returns with a report once
 something happened) and `node report.mjs` (what the recorders kept).
 Give the agent the skills in [`skills/`](skills/): [`mineflayer-game`](skills/mineflayer-game/SKILL.md)
 first, and the peer `mineflayer-*` skills for writing tasks, moving, looking,
@@ -170,7 +170,7 @@ services should serialize it or wrap getters rather than expose mutation.
 
 ## Example programs
 
-`examples/*.mjs` are short modules, each showing one way to do a task that the game candidates and plugins do not already show: reach maps and place graphs, terrain summaries, pictures, and a few read-only lookups. Agents read them, run them (`node game.mjs query <toolkit>/examples/reach-map.mjs`), import them from their own tasks, or copy and change them. Travelling is `game/candidates/goto.mjs`; fighting and eating are the services in `game/candidates/services.mjs`, backed by mineflayer-pvp and mineflayer-auto-eat. The examples need `vec3` installed beside this package.
+`examples/*.mjs` are short modules, each showing one way to do a task that the game's experimental code and plugins do not already show: reach maps and place graphs, terrain summaries, pictures, and a few read-only lookups. Agents read them, run them (`node game.mjs query <toolkit>/examples/reach-map.mjs`), import them from their own tasks, or copy and change them. Travelling is `game/experimental/goto.mjs`; fighting and eating are the reflexes in `game/experimental/reflexes.mjs`, backed by mineflayer-pvp and mineflayer-auto-eat. The examples need `vec3` installed beside this package.
 
 ## Tests
 

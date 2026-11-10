@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 export { createHost, ExitRequested } from './lib/host.mjs'
-export { summarizeWork, formatWork, formatSummary } from './lib/describe.mjs'
+export { summarizeJob, formatJob, formatSummary } from './lib/describe.mjs'
 export { runQuery } from './lib/query.mjs'
-export { serve, takeLock, socketPath, readLock, blockedFile } from './lib/server.mjs'
+export { openEntry, serve, socketPath, blockedFile } from './lib/server.mjs'
 export { loadPlugins, walkingMovements, defaultMovements, stopGameActions } from './lib/plugins.mjs'
 export { compatibleMinecraftOptions } from './lib/minecraft-compat.mjs'
 export { statusReport } from './observers/status.mjs'

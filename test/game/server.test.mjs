@@ -12,11 +12,20 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const cli = path.join(here, '../../game/bin/game.mjs')
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-function startMain (dir) {
-  const child = spawn(process.execPath, [path.join(here, 'fixtures/fake-main.mjs')], { env: { ...process.env, GAME_DIR: dir }, stdio: ['ignore', 'pipe', 'inherit'] })
+const fakeMain = path.join(here, 'fixtures/fake-main.mjs')
+
+function startMain (dir, { until = 'ready', env = {} } = {}) {
+  const child = spawn(process.execPath, [fakeMain], { env: { ...process.env, GAME_DIR: dir, ...env }, stdio: ['ignore', 'pipe', 'inherit'] })
   return new Promise((resolve, reject) => {
-    child.stdout.on('data', d => { if (String(d).includes('ready')) resolve(child) })
+    child.stdout.on('data', d => { if (String(d).includes(until)) resolve(child) })
     child.on('exit', code => reject(new Error(`main exited ${code}`)))
+  })
+}
+
+/** A main that may refuse to start: its exit code and output. */
+function runMain (dir) {
+  return new Promise(resolve => {
+    execFile(process.execPath, [fakeMain], { env: { ...process.env, GAME_DIR: dir }, timeout: 10000 }, (error, stdout) => resolve({ code: error?.code ?? 0, stdout }))
   })
 }
 
@@ -46,7 +55,7 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   assert.match(ok.stdout, /step 1/)
   assert.match(ok.stdout, /结果：7/)
   const w1 = await cmd(dir, ['wait'], { timeout: 3000 })
-  assert.match(w1.stdout, /最近结束的工作：w1-ok 完成/)
+  assert.match(w1.stdout, /最近结束的作业：j1-ok 完成/)
   assert.match(w1.stdout, /== status ==\nhp 20/)
 
   // Nothing pending now: wait blocks until a running task wakes it; the task goes on.
@@ -56,14 +65,15 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   }`)])
   const w2 = await cmd(dir, ['wait'], { timeout: 5000 })
   assert.match(w2.stdout, /halfway/)
-  assert.match(w2.stdout, /w2-long 进行中/)
+  assert.match(w2.stdout, /j2-long 进行中/)
 
-  // Killing the run command does not cancel the work.
+  // Killing the run command does not cancel the job.
   long.child.kill('SIGKILL')
   await long.done
   await sleep(100)
   const st = await cmd(dir, ['status'])
-  assert.match(st.stdout, /当前工作：w2-long/)
+  assert.match(st.stdout, /当前作业：j2-long/)
+  assert.match(st.stdout, new RegExp(`pid ${main.pid}`))
 
   // Cancel does.
   const c = await cmd(dir, ['cancel'])
@@ -82,4 +92,34 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   bg(dir, ['run', task('busy.mjs', 'export default async () => { const t = Date.now() + 4000; while (Date.now() < t) {} }')])
   assert.equal(await waiting.done, 1)
   assert.match(waiting.out(), /主线程/)
+})
+
+test('one main per project: a second one exits with a message; a stale socket is replaced', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'game-y-'))
+  const first = await startMain(dir)
+  t.after(() => first.kill('SIGKILL'))
+  const second = await runMain(dir)
+  assert.equal(second.code, 0)
+  assert.match(second.stdout, new RegExp(`main 已在运行（pid ${first.pid}，`))
+  assert.match((await cmd(dir, ['status'])).stdout, /角色活着/)
+
+  // A main killed outright leaves its socket file behind; nothing answers on it.
+  first.kill('SIGKILL')
+  await new Promise(resolve => first.once('exit', resolve))
+  assert.ok(fs.existsSync(path.join(dir, '.game/main.sock')))
+  assert.match((await cmd(dir, ['status'])).stdout, /main 没有在运行/)
+
+  // The next main takes the socket over; until it has a host it says it is starting.
+  const next = await startMain(dir, { until: 'entry open', env: { START_DELAY_MS: '1500' } })
+  t.after(() => next.kill('SIGKILL'))
+  const early = await cmd(dir, ['status'])
+  assert.equal(early.code, 1)
+  assert.match(early.stdout, /main 正在启动/)
+  await new Promise(resolve => next.stdout.on('data', d => { if (String(d).includes('ready')) resolve() }))
+  fs.writeFileSync(path.join(dir, 'ok.mjs'), 'export default async () => 1')
+  assert.equal((await cmd(dir, ['run', path.join(dir, 'ok.mjs')])).code, 0)
+
+  // stop ends it by the pid from its status reply.
+  const stop = await cmd(dir, ['stop'])
+  assert.match(stop.stdout, new RegExp(`main（pid ${next.pid}）已退出`))
 })

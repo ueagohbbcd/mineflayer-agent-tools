@@ -1,13 +1,17 @@
-// A main with a stand-in bot, for the cross-process tests.
+// A main with a stand-in bot, for the cross-process tests. START_DELAY_MS
+// keeps it between binding the socket and serving the host for that long.
 import { EventEmitter } from 'node:events'
 import { createHost } from '../../../game/lib/host.mjs'
-import { serve } from '../../../game/lib/server.mjs'
+import { openEntry, serve } from '../../../game/lib/server.mjs'
 
+const entry = await openEntry(process.env.GAME_DIR)
+console.log('entry open')
+await new Promise(resolve => setTimeout(resolve, Number(process.env.START_DELAY_MS ?? 0)))
 const bot = new EventEmitter()
 bot.health = 20
 bot.entity = { position: { x: 1, y: 64, z: 2 } }
 bot.quit = () => {}
 const host = createHost(bot, { dir: process.env.GAME_DIR, graceMs: 500, log: () => {}, cleanup: () => {} })
 host.addReport('status', () => 'hp 20')
-await serve(host, { blockedMs: 1000 })
+await serve(host, entry, { blockedMs: 1000 })
 console.log('ready')

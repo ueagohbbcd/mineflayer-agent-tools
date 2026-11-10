@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Loading a task or query module afresh (edits apply on the next run; modules
 // it imports stay cached until main restarts), and running a read-only query
-// beside the work. Read-only is a convention; the timeout only stops waiting.
+// beside the job. Read-only is a convention; the timeout only stops waiting.
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'

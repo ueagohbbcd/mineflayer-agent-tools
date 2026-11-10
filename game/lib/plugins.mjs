@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Everything about the ecosystem plugins in one place: loading them, the
 // walking-only Pathfinder default, and the stop-everything cleanup that the
-// exit flow runs. Observations behind each quirk: game/candidates/README.md.
+// exit flow runs. Observations behind each quirk: game/experimental/README.md.
 //
 //   await loadPlugins(bot)                    right after createBot
 //   createHost(bot, { cleanup: stopGameActions, ... })
@@ -13,7 +13,7 @@ const OPTIONAL = [
   // bot.pvp.attack(entity), bot.pvp.forceStop(): follows and swings until the target dies.
   ['mineflayer-pvp', mod => mod.plugin],
   // bot.autoEat.eat(): picks the best food, eats, puts the old item back. Its
-  // automatic eating stays off; the eat service decides when.
+  // automatic eating stays off; the eat reflex decides when.
   ['mineflayer-auto-eat', mod => mod.loader],
   // Puts on better armour as it is picked up (seen: an iron chestplate went on by itself).
   ['mineflayer-armor-manager', mod => mod.default],
@@ -67,7 +67,7 @@ export function defaultMovements (bot) {
 }
 
 /**
- * The game cleanup of the exit flow: stops whatever a task, service or idle
+ * The game cleanup of the exit flow: stops whatever a task, reflex or idle
  * left running on the bot, then puts the default movements back.
  */
 export function stopGameActions (bot) {

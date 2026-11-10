@@ -2,19 +2,19 @@
 
 `main.mjs` holds the character for as long as it runs. You write tasks (JavaScript modules in `tasks/`), hand them to it, and read what happened. You cannot see the game: you know only what reports, queries and pictures show you. `<toolkit>` means `node_modules/mineflayer-world-memory`.
 
-## The work loop
+## The job loop
 
 1. Start `node main.mjs` once, in the background. A second start in the same directory only says one is running.
-2. Submit work in the background: `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the work ends.
-3. Run `node game.mjs wait`. It returns with a report as soon as something happens (work ended, death, a takeover, a whisper or your name in chat), at once if something already happened.
-4. Read the report every time, even when `run` already printed the result: it also has health, food, time until night, inventory changes, who is around and what hurt you. Then decide and submit the next work.
+2. Submit a job in the background: `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the job ends.
+3. Run `node game.mjs wait`. It returns with a report as soon as something happens (a job ended, death, a reflex preempted the task, a whisper or your name in chat), at once if something already happened.
+4. Read the report every time, even when `run` already printed the result: it also has health, food, time until night, inventory changes, who is around and what hurt you. Then decide and submit the next job.
 
-Killing the `run` command only stops its output; the work goes on. `node game.mjs cancel` ends it. New work replaces the running one.
+Killing the `run` command only stops its output; the job goes on. `node game.mjs cancel` ends it. A new job replaces the running one.
 
 ## The task contract
 
 ```js
-import { goto } from "mineflayer-world-memory/game/candidates/goto.mjs";
+import { goto } from "mineflayer-world-memory/game/experimental/goto.mjs";
 
 export default async function task(bot, ctx) {
   const [x, y, z] = ctx.args.map(Number); // the words after the file name
@@ -26,18 +26,18 @@ export default async function task(bot, ctx) {
 ```
 
 - `ctx.args`, `ctx.log`, `ctx.signal` are all a task needs. `tasks/example.mjs` is a complete one.
-- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, new work, a takeover and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
+- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
 - The return value is the result; a thrown error is the failure, with its message.
 - A task that keeps going after the abort keeps the character: nothing else starts, and `wait` tells you main needs a restart.
 
-## What ends work without you asking
+## What ends a job without you asking
 
-- **Death.** The work ends; idle starts after respawn. The report has where you died and where you respawned.
-- **Danger takeover.** A hostile mob hurting you below 12 health starts `defend`; your head stuck in a block starts `escape`. The work ends with the service's result.
+- **Death.** The job ends; idle starts after respawn. The report has where you died and where you respawned.
+- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `defend` reflex; your head stuck in a block starts `escape`. The job ends with the reflex's result.
 
 Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
-## Between works
+## Between jobs
 
 Idle keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
 
@@ -45,11 +45,11 @@ Idle keeps the character alive: it fights back when hit, gets its head out of bl
 
 | Command | Does |
 | --- | --- |
-| `node game.mjs run <file> [args]` | submit work, follow it to the end |
+| `node game.mjs run <file> [args]` | submit a job, follow it to the end |
 | `node game.mjs wait` | return with the report once something happened |
-| `node game.mjs cancel` | end the current work |
-| `node game.mjs query <file> [args]` | run a read-only module now, even during work (10 s; `GAME_QUERY_TIMEOUT`) |
-| `node game.mjs status` | who controls the character, the current work |
+| `node game.mjs cancel` | end the current job |
+| `node game.mjs query <file> [args]` | run a read-only module now, even during a job (10 s; `GAME_QUERY_TIMEOUT`) |
+| `node game.mjs status` | who controls the character, the current job |
 | `node game.mjs stop` | end main (start it again in the background) |
 | `node report.mjs [name] [minutes]` | what the recorders kept (`explore`, `radar`); reads files only |
 
@@ -64,7 +64,7 @@ In this order, as far as you need:
 
 ## main.mjs is yours
 
-Which services, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
+Which reflexes, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
 
 ## Notes for this world
 

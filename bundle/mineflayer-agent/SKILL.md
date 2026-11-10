@@ -19,19 +19,19 @@ You control a character through [Mineflayer](https://github.com/PrismarineJS/min
 
 <!-- BEGIN player guide: generated from game/template/AGENTS.md by npm run build:bundle; edit that file. -->
 
-## The work loop
+## The job loop
 
 1. Start `node main.mjs` once, in the background. A second start in the same directory only says one is running.
-2. Submit work in the background: `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the work ends.
-3. Run `node game.mjs wait`. It returns with a report as soon as something happens (work ended, death, a takeover, a whisper or your name in chat), at once if something already happened.
-4. Read the report every time, even when `run` already printed the result: it also has health, food, time until night, inventory changes, who is around and what hurt you. Then decide and submit the next work.
+2. Submit a job in the background: `node game.mjs run tasks/x.mjs [args...]`. It prints the task's log lines and ends with the result when the job ends.
+3. Run `node game.mjs wait`. It returns with a report as soon as something happens (a job ended, death, a reflex preempted the task, a whisper or your name in chat), at once if something already happened.
+4. Read the report every time, even when `run` already printed the result: it also has health, food, time until night, inventory changes, who is around and what hurt you. Then decide and submit the next job.
 
-Killing the `run` command only stops its output; the work goes on. `node game.mjs cancel` ends it. New work replaces the running one.
+Killing the `run` command only stops its output; the job goes on. `node game.mjs cancel` ends it. A new job replaces the running one.
 
 ## The task contract
 
 ```js
-import { goto } from "mineflayer-world-memory/game/candidates/goto.mjs";
+import { goto } from "mineflayer-world-memory/game/experimental/goto.mjs";
 
 export default async function task(bot, ctx) {
   const [x, y, z] = ctx.args.map(Number); // the words after the file name
@@ -43,18 +43,18 @@ export default async function task(bot, ctx) {
 ```
 
 - `ctx.args`, `ctx.log`, `ctx.signal` are all a task needs. `tasks/example.mjs` is a complete one.
-- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, new work, a takeover and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
+- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
 - The return value is the result; a thrown error is the failure, with its message.
 - A task that keeps going after the abort keeps the character: nothing else starts, and `wait` tells you main needs a restart.
 
-## What ends work without you asking
+## What ends a job without you asking
 
-- **Death.** The work ends; idle starts after respawn. The report has where you died and where you respawned.
-- **Danger takeover.** A hostile mob hurting you below 12 health starts `defend`; your head stuck in a block starts `escape`. The work ends with the service's result.
+- **Death.** The job ends; idle starts after respawn. The report has where you died and where you respawned.
+- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `defend` reflex; your head stuck in a block starts `escape`. The job ends with the reflex's result.
 
 Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
-## Between works
+## Between jobs
 
 Idle keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
 
@@ -62,11 +62,11 @@ Idle keeps the character alive: it fights back when hit, gets its head out of bl
 
 | Command | Does |
 | --- | --- |
-| `node game.mjs run <file> [args]` | submit work, follow it to the end |
+| `node game.mjs run <file> [args]` | submit a job, follow it to the end |
 | `node game.mjs wait` | return with the report once something happened |
-| `node game.mjs cancel` | end the current work |
-| `node game.mjs query <file> [args]` | run a read-only module now, even during work (10 s; `GAME_QUERY_TIMEOUT`) |
-| `node game.mjs status` | who controls the character, the current work |
+| `node game.mjs cancel` | end the current job |
+| `node game.mjs query <file> [args]` | run a read-only module now, even during a job (10 s; `GAME_QUERY_TIMEOUT`) |
+| `node game.mjs status` | who controls the character, the current job |
 | `node game.mjs stop` | end main (start it again in the background) |
 | `node report.mjs [name] [minutes]` | what the recorders kept (`explore`, `radar`); reads files only |
 
@@ -81,24 +81,24 @@ In this order, as far as you need:
 
 ## main.mjs is yours
 
-Which services, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
+Which reflexes, idle, reports and plugins it uses is plain code. After editing it, `node game.mjs stop` and start it again. Modules a task imports are cached until main restarts; edits to the task file itself apply on the next run.
 
 <!-- END player guide -->
 
-## Advanced: checkpoints and restarts
+## Advanced: safepoints and attempts
 
-Optional. By default a takeover or a failed check ends the work and you decide what next. A task can instead offer checkpoints where a service may step in and the task then starts again:
+Optional. By default a preempt or a failed check ends the job and you decide what next. A task can instead offer safepoints where a reflex may preempt it and the task then runs again:
 
-- `await ctx.checkpoint({ eat: "pause", defend: "stop" })` checks those services at that point. If one is needed, the task leaves and the service runs. `pause`: afterwards the task starts again **from the top** with `ctx.attempt` one higher, and the `run` command keeps following it. `stop`: the work ends and idle takes over.
-- `goto(bot, ctx, xyz, { checks: { eat: "pause" } })` offers that checkpoint every half second.
-- Write a restartable task so a fresh start continues from where the character is: read the inventory and position first, skip what is already done.
-- Other `ctx` members: `ctx.cleanup(fn)` runs `fn` when the task leaves (for listeners and timers you add); `ctx.wake(reason)` makes `wait` return without ending the task; `ctx.takeover(name, { mode, reason })` hands over to a service yourself.
+- `await ctx.safepoint({ eat: "restart", defend: "end" })` checks those reflexes at that point. If one is needed, the task leaves and the reflex runs. `restart`: afterwards a new attempt runs the task **from the top** with `ctx.attempt` one higher, and the `run` command keeps following the job. `end`: the job ends and idle takes over.
+- `goto(bot, ctx, xyz, { checks: { eat: "restart" } })` offers that safepoint every half second.
+- Write a restartable task so a fresh attempt continues from where the character is: read the inventory and position first, skip what is already done.
+- Other `ctx` members: `ctx.cleanup(fn)` runs `fn` when the task leaves (for listeners and timers you add); `ctx.wake(reason)` makes `wait` return without ending the job; `ctx.preempt(name, { then, reason })` hands the character to a reflex yourself.
 
-## Library and candidates
+## Library and experimental code
 
 - Plugins main loads (`game/lib/plugins.mjs`): `mineflayer-pathfinder`, `mineflayer-pvp` (`bot.pvp`), `mineflayer-auto-eat` (`bot.autoEat`, automatic eating off), `mineflayer-armor-manager`, `mineflayer-tool` (`bot.tool`), `mineflayer-collectblock` (`bot.collectBlock`). Use them in tasks instead of writing your own fighting, eating or collecting. Pathfinder walks without digging by default; a task that needs digging sets its own movements, and they go back to walking-only when it leaves.
 - `<toolkit>/game/index.mjs`: what main is built from (host, reports, damage types, chat, plugins, the crafting fix, `oxygenOf(bot)`).
-- `<toolkit>/game/candidates/`: control logic that is still being tried: `goto` (travel), `craftChecked` (craft and check the count), the services `defend`, `escape`, `eat`, idle and the danger takeover. Use it, copy it, change it; its README says what has been checked on a server.
+- `<toolkit>/game/experimental/`: control logic that is still on trial: `goto` (travel), `craftChecked` (craft and check the count), the reflexes `defend`, `escape`, `eat`, idle and the danger observer that preempts with them. Use it, copy it, change it; its README says what has been checked on a server.
 
 ## More ways to look
 
@@ -127,5 +127,5 @@ Read the one you need when you need it:
 - **Writing programs** ([mineflayer-programs](references/mineflayer-programs.md)): a program is one async function on the shared `bot` that does a bounded job and returns. Load plugins once per bot, stop on the abort signal and clean up goals, controls and listeners in `finally`, and never block the event loop. It also covers the watchdog library, this package's helpers (live-first block reads, pictures, tree query), and installing and connecting without the game process. Read it before your first task.
 - **Getting around** ([mineflayer-navigation](references/mineflayer-navigation.md)): move with Pathfinder, setting `Movements` for what a path may do (digging, towers, parkour, drops). After `NoPath` or a stall, look before retrying the same goal. Before using the hand, wait until Pathfinder has really stopped. Keep a few waypoints for places you come back to.
 - **Looking at the world** ([mineflayer-surroundings](references/mineflayer-surroundings.md)): the bot knows only the chunks the server sent, and unknown is not air. Read blocks live first, with history only for unloaded chunks. Entities, players and signs, pictures when shape matters, one tree's logs, and the radar and explore observers.
-- **Items and containers** ([mineflayer-items](references/mineflayer-items.md)): dig with the right tool, place against a face with no entity in the cell, and equip again each time work resumes. Craft with the right number of runs. Take only what you need from a chest, using the numeric item type.
-- **Staying alive** ([mineflayer-survival](references/mineflayer-survival.md)): eat before health drops, fight with PvP, and defend while walking. Get out of water and check below before digging. Use a bed only in the overworld. In the game process, main's services and idle fight back, eat and get you out of blocks.
+- **Items and containers** ([mineflayer-items](references/mineflayer-items.md)): dig with the right tool, place against a face with no entity in the cell, and equip again each time a program resumes. Craft with the right number of runs. Take only what you need from a chest, using the numeric item type.
+- **Staying alive** ([mineflayer-survival](references/mineflayer-survival.md)): eat before health drops, fight with PvP, and defend while walking. Get out of water and check below before digging. Use a bed only in the overworld. In the game process, main's reflexes and idle fight back, eat and get you out of blocks.

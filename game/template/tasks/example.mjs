@@ -5,9 +5,9 @@
 // A task is a module whose default export gets the bot and ctx:
 //   ctx.args    the words after the file name, as strings
 //   ctx.log     a line for the run output and the result
-//   ctx.signal  aborts when the work must end (cancel, new work, takeover, death)
+//   ctx.signal  aborts when the task must stop (cancel, new job, preempt, death)
 // The return value is the result; a thrown error is the failure.
-import { goto } from 'mineflayer-world-memory/game/candidates/goto.mjs'
+import { goto } from 'mineflayer-world-memory/game/experimental/goto.mjs'
 
 export default async function task (bot, ctx) {
   const [x, y, z] = ctx.args.map(Number)

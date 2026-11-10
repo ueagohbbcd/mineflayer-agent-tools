@@ -4,7 +4,7 @@
  *
  *   node game.mjs run <toolkit>/examples/watch-surroundings.mjs [block=chest] [seconds=600]
  *
- * It is submitted as work, so it replaces the running work; it only reads
+ * It is submitted as a job, so it replaces the running job; it only reads
  * the world while it waits. Start it in the background: its end is what
  * tells you something was found.
  */

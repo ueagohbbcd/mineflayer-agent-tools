@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Candidate services (see README). Each is { check?(bot), run(bot, ctx) };
+// Experimental reflexes (see README). Each is { check?(bot), run(bot, ctx) };
 // run checks ctx.signal at entry and after every await, and returns or throws
 // before any further game action once it has aborted.
 import pathfinderPkg from 'mineflayer-pathfinder'

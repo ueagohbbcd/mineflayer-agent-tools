@@ -1,6 +1,6 @@
 ---
 name: mineflayer-survival
-description: "Keeping a Mineflayer character alive: eating, fighting with PvP, defending while walking, water and air, falls and lava, beds and respawn points, and the game process's services that keep you alive. Use before trips into danger and when the character takes damage."
+description: "Keeping a Mineflayer character alive: eating, fighting with PvP, defending while walking, water and air, falls and lava, beds and respawn points, and the game process's reflexes that keep you alive. Use before trips into danger and when the character takes damage."
 ---
 
 # Staying alive
@@ -19,4 +19,4 @@ Right-click a bed with `await bot.activateBlock(bedBlock)` from within about two
 
 ## In the game process
 
-Fighting back, eating and getting out of blocks are main's services (`defend`, `eat`, `escape` in [services.mjs](../../game/candidates/services.mjs)), built on mineflayer-pvp, mineflayer-auto-eat and mineflayer-tool. What they take over and when is in `mineflayer-game`. The `wait` report's 受伤 section names what hurt you (mob, suffocation, fall, drowning).
+Fighting back, eating and getting out of blocks are main's reflexes (`defend`, `eat`, `escape` in [reflexes.mjs](../../game/experimental/reflexes.mjs)), built on mineflayer-pvp, mineflayer-auto-eat and mineflayer-tool. When they preempt a task is in `mineflayer-game`. The `wait` report's 受伤 section names what hurt you (mob, suffocation, fall, drowning).

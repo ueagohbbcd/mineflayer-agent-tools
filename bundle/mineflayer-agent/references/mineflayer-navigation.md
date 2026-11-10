@@ -42,5 +42,5 @@ Once you know a place, write down a few footholds you will come back to: one per
 
 ## Examples
 
-- [goto.mjs](../../../game/candidates/goto.mjs): the one way to travel in a task: a trip that ends when it arrives, finds no path or stalls, checking arrival as above.
+- [goto.mjs](../../../game/experimental/goto.mjs): the one way to travel in a task: a trip that ends when it arrives, finds no path or stalls, checking arrival as above.
 - [reach-map.mjs](../../../examples/reach-map.mjs), [profile.mjs](../../../examples/profile.mjs) and [place-graph.mjs](../../../examples/place-graph.mjs): where you can walk from here, the ground along a line, and which waypoints connect (read-only).

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-// Candidate navigation (see README): Pathfinder to a block with the current
+// Experimental navigation (see README): Pathfinder to a block with the current
 // movements (walking only by default), checking every 0.5 s. Returns where it
 // arrived; throws on no path, on no progress for `stallMs`, and with
 // ctx.signal's reason once the exit is requested.
 //
 //   await goto(bot, ctx, [x, y, z])                        → { arrived: [x, y, z] }
 //   await goto(bot, ctx, [x, y, z], { range: 2, stallMs: 30000 })
-//   await goto(bot, ctx, [x, y, z], { checks: { eat: 'pause' } })   advanced: a checkpoint every 0.5 s
+//   await goto(bot, ctx, [x, y, z], { checks: { eat: 'restart' } })   advanced: a safepoint every 0.5 s
 //
 // Arrival is checked the way Pathfinder decides goal_reached (the feet cell
 // or the one above meets the goal), not by a distance of its own.
@@ -29,7 +29,7 @@ export async function goto (bot, ctx, [x, y, z], { range = 1, checks = {}, stall
   let movedAt = Date.now()
   try {
     for (;;) {
-      if (Object.keys(checks).length) await ctx.checkpoint(checks)
+      if (Object.keys(checks).length) await ctx.safepoint(checks)
       ctx.signal.throwIfAborted()
       const feet = bot.entity.position.floored()
       if (goal.isEnd(feet) || goal.isEnd(feet.offset(0, 1, 0))) return { arrived: [feet.x, feet.y, feet.z] }

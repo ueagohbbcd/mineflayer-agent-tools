@@ -3,9 +3,9 @@
 // Commands for a running main. Run them in the project directory (or set
 // GAME_DIR).
 //
-//   node game.mjs run <file> [args...]   submit work and follow it to the end;
+//   node game.mjs run <file> [args...]   submit a job and follow it to the end;
 //                                        killing this command does not cancel it
-//   node game.mjs cancel                 cancel the current work
+//   node game.mjs cancel                 cancel the job
 //   node game.mjs wait                   return with the report when something
 //                                        happens (at once if something already has)
 //   node game.mjs query <file> [args...] run a read-only module now
@@ -15,10 +15,12 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import { formatSummary } from '../lib/describe.mjs'
-import { blockedFile, readLock, socketPath } from '../lib/server.mjs'
+import { blockedFile, socketPath } from '../lib/server.mjs'
 
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
 const [command, arg, ...rest] = process.argv.slice(2)
+const NOT_RUNNING = 'main 没有在运行（先在后台启动 node main.mjs）'
+const notRunning = error => error.code === 'ENOENT' || error.code === 'ECONNREFUSED'
 
 function fail (message) {
   console.log(message)
@@ -49,10 +51,35 @@ function request (body, onMessage, { timeoutMs = 0 } = {}) {
     })
     conn.on('close', () => resolve())
     conn.on('error', error => {
-      if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') reject(new Error('main 没有在运行（先在后台启动 node main.mjs）'))
+      if (notRunning(error)) reject(Object.assign(new Error(NOT_RUNNING), { code: error.code }))
       else reject(error)
     })
   })
+}
+
+function alive (pid) {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/**
+ * main's pid from its status reply; null when nothing listens on the socket.
+ * A main whose thread is blocked cannot reply: its pid is then in the file
+ * the watchdog worker writes once the block has lasted a few seconds.
+ */
+async function mainPid () {
+  let out
+  try {
+    await request({ type: 'status' }, msg => { out = msg }, { timeoutMs: 3000 })
+    if (out?.pid) return out.pid
+  } catch (error) {
+    if (error.code) return null
+  }
+  for (let i = 0; i < 100; i++) {
+    const pid = blockedSince(0)?.pid
+    if (pid && alive(pid)) return pid
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  fail('main 没有回复，也没有留下 pid（.game/blocked.json）；请手动结束 main 进程')
 }
 
 function blockedSince (startedAt) {
@@ -71,14 +98,14 @@ try {
       let result = null
       let error = null
       await request({ type: 'run', file: path.resolve(arg), args: rest }, msg => {
-        if (msg.type === 'started') console.log(`工作 ${msg.id} 开始`)
+        if (msg.type === 'started') console.log(`作业 ${msg.id} 开始`)
         else if (msg.type === 'log') console.log(msg.line)
         else if (msg.type === 'event') console.log(msg.text)
         else if (msg.type === 'result') result = msg.summary
         else if (msg.type === 'error') error = msg.error
       })
       if (error) fail(error)
-      if (!result) fail('main 在工作结束前断开了（进程退出或被重启）')
+      if (!result) fail('main 在作业结束前断开了（进程退出或被重启）')
       console.log(formatSummary(result))
       process.exit(result.ok ? 0 : 1)
       break
@@ -119,23 +146,25 @@ try {
     case 'status': {
       let out
       await request({ type: 'status' }, msg => { out = msg }, { timeoutMs: 5000 })
+      if (out?.type !== 'status') fail(out?.error ?? 'main 没有回复')
       const c = out.controller
+      console.log(`main：pid ${out.pid}，${out.since} 启动`)
       console.log(out.alive ? '角色活着' : '角色已死亡')
       console.log(`控制者：${c ? `${c.kind} ${c.name}${{ exiting: '（正在退出）', stuck: '（不肯退出，需要重启进程）' }[c.phase] ?? ''}` : '无'}`)
-      if (out.work) console.log(`${out.work.status === 'running' ? '当前工作' : '上一项工作'}：${formatSummary(out.work).split('\n')[0]}`)
+      if (out.job) console.log(`${out.job.status === 'running' ? '当前作业' : '上一项作业'}：${formatSummary(out.job).split('\n')[0]}`)
       if (out.pending) console.log('有未取的报告：node game.mjs wait 会立即返回')
       break
     }
     case 'stop': {
-      const lock = readLock(dir)
-      if (!lock) fail('main 没有在运行')
-      process.kill(lock.pid, 'SIGTERM')
-      for (let i = 0; i < 50 && readLock(dir); i++) await new Promise(resolve => setTimeout(resolve, 100))
-      if (readLock(dir)) {
-        process.kill(lock.pid, 'SIGKILL')
-        console.log(`main（pid ${lock.pid}）5 秒内没有退出，已强制结束`)
+      const pid = await mainPid()
+      if (!pid) fail('main 没有在运行')
+      process.kill(pid, 'SIGTERM')
+      for (let i = 0; i < 50 && alive(pid); i++) await new Promise(resolve => setTimeout(resolve, 100))
+      if (alive(pid)) {
+        process.kill(pid, 'SIGKILL')
+        console.log(`main（pid ${pid}）5 秒内没有退出，已强制结束`)
       } else {
-        console.log(`main（pid ${lock.pid}）已退出`)
+        console.log(`main（pid ${pid}）已退出`)
       }
       break
     }

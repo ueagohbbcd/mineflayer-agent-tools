@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: MIT
-// The resident core: one bot, one current piece of work, one controller at a
-// time (task, service or idle), one exit flow, wake and reports. It knows
-// nothing about the game; stopping the bot's own actions is the injected
-// `cleanup`.
+// The resident core: one bot, one job (the task file the model submitted,
+// followed to its end across attempts), one controller at a time (task,
+// reflex or idle), one exit flow, wake and reports. It knows nothing about
+// the game; stopping the bot's own actions is the injected `cleanup`.
 //
-//   const host = createHost(bot, { dir, services, idle, cleanup })
+//   const host = createHost(bot, { dir, reflexes, idle, cleanup })
 //
-// services: { name: { check?(bot) → reason|null, run(bot, ctx) } }. A task
-// offers checkpoints with ctx.checkpoint({ name: 'pause' | 'stop' }); a module
-// asks for a takeover with host.takeover(name, { mode, reason }).
+// reflexes: { name: { check?(bot) → reason|null, run(bot, ctx) } }. A task
+// offers safepoints with ctx.safepoint({ name: 'restart' | 'end' }); an
+// observer preempts with host.preempt(name, { then, reason }).
 //
-// Exit flow, shared by cancel, replace, takeover and death: the requester
+// Exit flow, shared by cancel, replace, preempt and death: the requester
 // records what comes next (`next`) and the controller's signal aborts → its
 // cleanups and the game cleanup run → the controller's promise settles →
 // settle() carries out `next`. Nothing else takes the bot before that. A later
 // request overrides an earlier one by rank: death > cancel = replace >
-// takeover. A controller still running graceMs after the request keeps the bot
+// preempt. A controller still running graceMs after the request keeps the bot
 // (phase 'stuck') and the model is woken; when it settles at last, settle()
 // proceeds as usual. The fallback for one that never settles is restarting the
 // process.
 import fs from 'node:fs'
 import path from 'node:path'
-import { describeController, describeNow, endWord, errorText, formatWork, summarizeWork, text } from './describe.mjs'
+import { describeController, describeNow, endWord, errorText, formatJob, summarizeJob, text } from './describe.mjs'
 import { loadDefault } from './query.mjs'
 
 export class ExitRequested extends Error {
@@ -32,13 +32,13 @@ export class ExitRequested extends Error {
   }
 }
 
-const RANK = { takeover: 1, cancel: 2, replace: 2, death: 3 }
+const RANK = { preempt: 1, cancel: 2, replace: 2, death: 3 }
 const EXIT_RULE = '每次 await 之后检查 ctx.signal.aborted，为真就返回'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 export function createHost (bot, {
   dir,
-  services = {},
+  reflexes = {},
   idle = null,
   cleanup = () => {},
   graceMs = 5000,
@@ -47,15 +47,15 @@ export function createHost (bot, {
 } = {}) {
   if (!dir) throw new Error('createHost needs { dir }')
   const reports = [] // [name, fn]
-  // The controller: { kind: 'task'|'service'|'idle', name, work, ac, cleanups,
-  // phase: 'running'|'exiting'|'stuck'|'done', why, confirms, mode, reason }
+  // The controller: { kind: 'task'|'reflex'|'idle', name, job, ac, cleanups,
+  // phase: 'running'|'exiting'|'stuck'|'done', why, confirms, then, reason }
   let controller = null
   // What follows the current controller's exit, set by whoever asked for it:
-  // { kind, why, end?: result for its work, service?: { name, mode, reason }, start?: new work }
+  // { kind, why, end?: result for its job, reflex?: { name, then, reason }, start?: new job }
   let next = null
-  let work = null // the current piece of work, or the last one
-  let workSeq = 0
-  let endSeq = 0 // works that have ended
+  let job = null // the current job, or the last one
+  let jobSeq = 0
+  let endSeq = 0 // jobs that have ended
   let alive = true
 
   // ---- wake ----------------------------------------------------------------
@@ -87,8 +87,8 @@ export function createHost (bot, {
     reasons = []
     const lines = []
     lines.push(why.length ? `唤醒原因：\n${why.map(r => `  ${r}`).join('\n')}` : '唤醒原因：无新唤醒')
-    lines.push(`现在：${describeNow({ alive, work, controller })}`)
-    if (ends > reportedEndSeq && work?.status === 'ended') lines.push(`最近结束的工作：${formatWork(work)}`)
+    lines.push(`现在：${describeNow({ alive, job, controller })}`)
+    if (ends > reportedEndSeq && job?.status === 'ended') lines.push(`最近结束的作业：${formatJob(job)}`)
     for (const [name, fn] of reports) {
       try {
         const out = await Promise.race([
@@ -130,28 +130,28 @@ export function createHost (bot, {
     })
   }
 
-  // ---- work ----------------------------------------------------------------
-  function emitWork (type, value, w = work) {
-    if (!w) return
+  // ---- job -----------------------------------------------------------------
+  function emitJob (type, value, j = job) {
+    if (!j) return
     const msg = { type, ...(typeof value === 'object' && value !== null ? value : { text: value }) }
-    for (const sink of w.sinks) {
+    for (const sink of j.sinks) {
       try { sink(msg) } catch {}
     }
   }
 
-  function finishWork (w, result) {
-    if (w.status === 'ended') return
-    w.status = 'ended'
-    w.endedAt = Date.now()
-    w.result = result
+  function finishJob (j, result) {
+    if (j.status === 'ended') return
+    j.status = 'ended'
+    j.endedAt = Date.now()
+    j.result = result
     endSeq++
     const p = bot.entity?.position
     // After a death the bot may already stand at its respawn point; the death
     // position is in the end word instead.
-    w.position = p && result.ended !== 'death' ? [p.x, p.y, p.z].map(n => Math.round(n * 10) / 10) : null
-    emitWork('result', { summary: summarizeWork(w) }, w)
-    w.sinks.clear()
-    wake(`工作 ${w.id} ${endWord(w)}`)
+    j.position = p && result.ended !== 'death' ? [p.x, p.y, p.z].map(n => Math.round(n * 10) / 10) : null
+    emitJob('result', { summary: summarizeJob(j) }, j)
+    j.sinks.clear()
+    wake(`作业 ${j.id} ${endWord(j)}`)
   }
 
   // ---- controllers ---------------------------------------------------------
@@ -163,14 +163,14 @@ export function createHost (bot, {
   }
 
   /** Make `run(ctx, ctrl)` the controller; settle() runs when it settles. */
-  function start (kind, name, w, run, extra = {}) {
-    const ctrl = { kind, name, work: w, ac: new AbortController(), cleanups: [], phase: 'running', confirms: [], ...extra }
+  function start (kind, name, j, run, extra = {}) {
+    const ctrl = { kind, name, job: j, ac: new AbortController(), cleanups: [], phase: 'running', confirms: [], ...extra }
     controller = ctrl
     const ctx = {
       signal: ctrl.ac.signal,
       cleanup: fn => { ctrl.cleanups.push(fn) },
       wake,
-      takeover: (service, opts) => takeover(service, opts)
+      preempt: (reflex, opts) => preempt(reflex, opts)
     }
     Promise.resolve()
       .then(() => run(ctx, ctrl))
@@ -207,12 +207,12 @@ export function createHost (bot, {
   function markStuck (ctrl) {
     if (controller !== ctrl || ctrl.phase !== 'exiting') return
     ctrl.phase = 'stuck'
-    const last = ctrl.work?.log.at(-1)
+    const last = ctrl.job?.log.at(-1)
     const msg = `${describeController(ctrl)} 收到退出请求（${ctrl.why}）后 ${graceMs / 1000} 秒没有退出，仍占着角色` +
       `${last ? `；它最后输出的一行：${last}` : ''}。任务要做到：${EXIT_RULE}。` +
       '现在要恢复就重启游戏进程：node game.mjs stop，然后重新启动 main。'
     log(msg)
-    emitWork('event', msg, ctrl.work)
+    emitJob('event', msg, ctrl.job)
     wake(msg)
     for (const resolve of ctrl.confirms.splice(0)) resolve(false)
   }
@@ -233,67 +233,68 @@ export function createHost (bot, {
 
   /**
    * Decides what follows `ctrl` (null when there was no controller): a queued
-   * service, else a restart of the task, else the end of the work; then the
-   * replacing work or idle.
+   * reflex, else a new attempt of the task, else the end of the job; then the
+   * replacing job or idle.
    */
   function proceed (ctrl, outcome) {
     const intent = next
     next = null
-    const w = ctrl ? ctrl.work : (work?.status === 'running' ? work : null)
+    const j = ctrl ? ctrl.job : (job?.status === 'running' ? job : null)
     let end = intent?.end ?? null
     let restart = false
     if (ctrl?.kind === 'task' && outcome) {
       end = outcome.ok ? { ok: true, value: outcome.value } : { ok: false, error: errorText(outcome.error) }
     }
-    if (ctrl?.kind === 'service' && outcome) {
+    if (ctrl?.kind === 'reflex' && outcome) {
       const after = outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${errorText(outcome.error)}`
-      emitWork('event', `[介入] ${ctrl.name} ${after}`, w)
-      if (!w) wake(`${ctrl.name} ${after}`)
-      restart = ctrl.mode === 'pause'
-      end = { ok: false, stoppedBy: ctrl.name, reason: ctrl.reason, service: after }
+      emitJob('event', `[抢占] ${ctrl.name} ${after}`, j)
+      if (!j) wake(`${ctrl.name} ${after}`)
+      restart = ctrl.then === 'restart'
+      end = { ok: false, preemptedBy: ctrl.name, reason: ctrl.reason, reflex: after }
     }
-    const running = w?.status === 'running'
+    const running = j?.status === 'running'
 
-    if (alive && intent?.service) return startService(intent.service, running ? w : null)
+    if (alive && intent?.reflex) return startReflex(intent.reflex, running ? j : null)
     if (alive && restart && running) {
-      emitWork('event', `[重启] 第 ${w.attempts + 1} 次从入口运行`, w)
-      return startAttempt(w)
+      emitJob('event', `[重跑] 第 ${j.attempts + 1} 次尝试，从入口运行`, j)
+      return startAttempt(j)
     }
-    if (running && end) finishWork(w, end)
+    if (running && end) finishJob(j, end)
     if (alive && intent?.start) {
-      work = intent.start
-      return startAttempt(work)
+      job = intent.start
+      return startAttempt(job)
     }
     if (ctrl?.kind === 'idle' && outcome) return idleEnded(outcome)
     startIdle()
   }
 
-  // ---- tasks, services, idle -------------------------------------------------
-  function startAttempt (w) {
-    w.attempts++
-    start('task', w.id, w, async (ctx, ctrl) => {
-      const task = await loadDefault(w.file)
+  // ---- tasks, reflexes, idle -------------------------------------------------
+  /** One attempt: a run of the job's task file from its entry. */
+  function startAttempt (j) {
+    j.attempts++
+    start('task', j.id, j, async (ctx, ctrl) => {
+      const task = await loadDefault(j.file)
       return task(bot, {
         ...ctx,
-        args: w.args,
-        attempt: w.attempts,
+        args: j.args,
+        attempt: j.attempts,
         log: (...parts) => {
           const line = parts.map(text).join(' ')
-          w.log.push(line)
-          if (w.log.length > 30) w.log.shift()
-          emitWork('log', { line }, w)
+          j.log.push(line)
+          if (j.log.length > 30) j.log.shift()
+          emitJob('log', { line }, j)
         },
-        checkpoint: spec => checkpoint(ctrl, spec)
+        safepoint: spec => safepoint(ctrl, spec)
       })
     })
   }
 
-  function startService ({ name, mode, reason }, w) {
-    start('service', name, w, ctx => services[name].run(bot, { ...ctx, reason }), { mode, reason })
+  function startReflex ({ name, then, reason }, j) {
+    start('reflex', name, j, ctx => reflexes[name].run(bot, { ...ctx, reason }), { then, reason })
   }
 
   function startIdle () {
-    if (!idle || controller || !alive || work?.status === 'running') return
+    if (!idle || controller || !alive || job?.status === 'running') return
     start('idle', 'idle', null, ctx => idle(bot, ctx))
   }
 
@@ -308,48 +309,49 @@ export function createHost (bot, {
     setTimeout(startIdle, 2000)
   }
 
-  /** A checkpoint offered by the running task. Throws ExitRequested when a service takes over. */
-  async function checkpoint (ctrl, spec = {}) {
+  /** A safepoint offered by the running task. Throws ExitRequested when a reflex preempts it. */
+  async function safepoint (ctrl, spec = {}) {
     if (ctrl.ac.signal.aborted) throw ctrl.ac.signal.reason
-    for (const [name, mode] of Object.entries(spec)) {
-      const service = services[name]
-      if (!service) throw new Error(`没有名为 ${name} 的服务（已有：${Object.keys(services).join(', ') || '无'}）`)
-      if (typeof service.check !== 'function') continue
+    for (const [name, then] of Object.entries(spec)) {
+      const reflex = reflexes[name]
+      if (!reflex) throw new Error(`没有名为 ${name} 的反射（已有：${Object.keys(reflexes).join(', ') || '无'}）`)
+      if (typeof reflex.check !== 'function') continue
       let reason
-      try { reason = await service.check(bot) } catch (error) { reason = null; log(`服务 ${name} 检查出错：${errorText(error)}`) }
+      try { reason = await reflex.check(bot) } catch (error) { reason = null; log(`反射 ${name} 检查出错：${errorText(error)}`) }
       if (reason) {
-        takeover(name, { mode, reason: text(reason) })
-        throw new ExitRequested(`介入：${name}`)
+        preempt(name, { then, reason: text(reason) })
+        throw new ExitRequested(`抢占：${name}`)
       }
     }
   }
 
   /**
-   * Hand the bot to a service. mode 'pause' restarts the task from its entry
-   * afterwards; 'stop' (the default) ends the work and goes to idle.
+   * Hand the bot to a reflex. then 'restart' runs the task again from its
+   * entry afterwards (a new attempt); 'end' (the default) ends the job and
+   * goes to idle.
    */
-  function takeover (name, { mode = 'stop', reason = '' } = {}) {
-    if (!services[name]) return { ok: false, error: `没有名为 ${name} 的服务` }
+  function preempt (name, { then = 'end', reason = '' } = {}) {
+    if (!reflexes[name]) return { ok: false, error: `没有名为 ${name} 的反射` }
     if (!alive) return { ok: false, error: '角色已死亡' }
     if (next) return { ok: false, error: `退出进行中（${next.why}）` }
-    if (controller?.kind === 'service') return { ok: false, error: `服务 ${controller.name} 正在控制` }
-    const w = controller?.kind === 'task' ? controller.work : null
-    const modeWord = !w ? '' : mode === 'pause' ? '，结束后从入口重新运行任务' : '，结束后转 idle'
-    const msg = `${name} 接管（${reason || '无原因'}）${modeWord}`
+    if (controller?.kind === 'reflex') return { ok: false, error: `反射 ${controller.name} 正在控制` }
+    const j = controller?.kind === 'task' ? controller.job : null
+    const thenWord = !j ? '' : then === 'restart' ? '，之后从入口重跑任务' : '，之后结束作业、转 idle'
+    const msg = `${name} 抢占（${reason || '无原因'}）${thenWord}`
     log(msg)
-    emitWork('event', `[介入] ${msg}`, w)
+    emitJob('event', `[抢占] ${msg}`, j)
     wake(msg)
-    const done = requestExit({ kind: 'takeover', why: `介入：${name}`, service: { name, mode, reason } })
+    const done = requestExit({ kind: 'preempt', why: `抢占：${name}`, reflex: { name, then, reason } })
     return { ok: true, done }
   }
 
-  /** Submit a task file as the current work. A running work is replaced. */
+  /** Submit a task file as the job. A running job is replaced. */
   async function submit (file, { args = [], sink } = {}) {
     if (!alive) return { ok: false, error: '角色已死亡，等重生后再提交' }
     const abs = path.resolve(file)
     if (!fs.existsSync(abs)) return { ok: false, error: `找不到文件 ${abs}` }
-    const w = {
-      id: `w${++workSeq}-${path.basename(abs, path.extname(abs))}`,
+    const j = {
+      id: `j${++jobSeq}-${path.basename(abs, path.extname(abs))}`,
       file: abs,
       args,
       attempts: 0,
@@ -358,25 +360,25 @@ export function createHost (bot, {
       log: [],
       sinks: new Set(sink ? [sink] : [])
     }
-    const replacing = work?.status === 'running'
-    const intent = { kind: 'replace', why: replacing ? '被新工作替换' : '开始新工作', end: { ok: false, ended: 'replaced' }, start: w }
+    const replacing = job?.status === 'running'
+    const intent = { kind: 'replace', why: replacing ? '被新作业替换' : '开始新作业', end: { ok: false, ended: 'replaced' }, start: j }
     if (!(await requestExit(intent))) {
-      // The new work will not start; the old one ends as cancelled whenever it exits.
-      if (next === intent) next = { kind: 'cancel', why: intent.why, end: { ok: false, ended: 'cancelled', reason: '换工作时不肯退出' } }
+      // The new job will not start; the old one ends as cancelled whenever it exits.
+      if (next === intent) next = { kind: 'cancel', why: intent.why, end: { ok: false, ended: 'cancelled', reason: '换作业时不肯退出' } }
       return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
     }
-    if (work !== w) return { ok: false, error: alive ? '这次提交被之后的提交或取消取代，没有开始' : '角色已死亡，工作没有开始' }
-    return { ok: true, id: w.id, work: w }
+    if (job !== j) return { ok: false, error: alive ? '这次提交被之后的提交或取消取代，没有开始' : '角色已死亡，作业没有开始' }
+    return { ok: true, id: j.id, job: j }
   }
 
   /** Explicit cancel: the exit flow, and nothing queued runs afterwards. */
   async function cancel (reason = '已取消') {
-    const w = work?.status === 'running' ? work : null
-    if (!w) return { ok: true, note: '没有正在进行的工作' }
+    const j = job?.status === 'running' ? job : null
+    if (!j) return { ok: true, note: '没有正在进行的作业' }
     if (!(await requestExit({ kind: 'cancel', why: reason, end: { ok: false, ended: 'cancelled', reason } }))) {
       return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
     }
-    return { ok: true, summary: summarizeWork(w) }
+    return { ok: true, summary: summarizeJob(j) }
   }
 
   // ---- death and respawn ----------------------------------------------------
@@ -387,7 +389,7 @@ export function createHost (bot, {
   bot.on('death', () => {
     alive = false
     const where = here()
-    if (controller || work?.status === 'running') {
+    if (controller || job?.status === 'running') {
       requestExit({ kind: 'death', why: '死亡', end: { ok: false, ended: 'death', where } })
     }
     wake(`死亡，位置 ${where}`)
@@ -411,16 +413,16 @@ export function createHost (bot, {
     collect,
     submit,
     cancel,
-    takeover,
+    preempt,
     addReport: (name, fn) => { reports.push([name, fn]) },
     status: () => ({
       alive,
       controller: controller && { kind: controller.kind, name: controller.name, phase: controller.phase },
-      work: work && summarizeWork(work),
+      job: job && summarizeJob(job),
       pending: pending(),
       next: next?.kind ?? null
     }),
     get controller () { return controller },
-    get work () { return work }
+    get job () { return job }
   }
 }

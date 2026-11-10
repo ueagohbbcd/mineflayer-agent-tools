@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Candidate idle loop (see README): what the character does with no work.
-import { defend, eat, escape, headBlocked, nearestHostile } from './services.mjs'
+// Experimental idle loop (see README): what the character does with no job.
+import { defend, eat, escape, headBlocked, nearestHostile } from './reflexes.mjs'
 
 export async function idle (bot, ctx) {
   const { signal } = ctx

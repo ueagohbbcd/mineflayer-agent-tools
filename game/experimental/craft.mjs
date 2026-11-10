@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Candidate (see README): craft by item name and check that the count rose.
+// Experimental (see README): craft by item name and check that the count rose.
 // The grid clean-up itself is in lib/crafting-fix.mjs. Stops at entry and
 // after the craft when ctx.signal has aborted.
 //

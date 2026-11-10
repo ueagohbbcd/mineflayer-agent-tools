@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { startExplore, summarize as summarizeExplore } from "../../game/observers/explore.mjs";
 import { radarState, startRadar } from "../../game/observers/radar.mjs";
-import { startDanger } from "../../game/candidates/danger-alerts.mjs";
+import { startDanger } from "../../game/experimental/danger-alerts.mjs";
 
 const posted = () => {
   const entries = [];
