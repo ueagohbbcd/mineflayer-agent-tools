@@ -4,6 +4,12 @@
 // after the craft when ctx.signal has aborted.
 //
 //   await craftChecked(bot, ctx, 'stick', 4, tableBlock)
+// Does: crafts `count` of `itemName` (with `table` when given) and throws unless
+//   the inventory count rose; returns { item, before, after }.
+// Checked: 2026-11-10, local 1.21.1: 20 crafts in a row (craft-checked.mjs),
+//   all counts rose, inventory matched the server (1 run).
+// Limits: relies on fixCrafting in main for consecutive crafts; it detects a
+//   desynced inventory but does not repair it.
 export async function craftChecked (bot, ctx, itemName, count = 1, table = null) {
   ctx.signal.throwIfAborted()
   const item = bot.registry.itemsByName[itemName]

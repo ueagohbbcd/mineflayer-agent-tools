@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: MIT
+// Recipe-packet fix for protocol 767 (Minecraft 1.21/1.21.1): drops
+// crafting_special_banneraddpattern from minecraft-data's recipe-type mapping so
+// the IDs after it line up when declare_recipes is parsed. game/template/main.mjs
+// passes its createBot options through compatibleMinecraftOptions.
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);

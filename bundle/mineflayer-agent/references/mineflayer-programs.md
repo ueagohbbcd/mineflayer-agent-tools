@@ -80,7 +80,7 @@ try {
 }
 ```
 
-Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a door, fishing). See [docs/watchdog.md](../../../docs/watchdog.md) for options.
+Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a door, fishing). See [docs/libraries/watchdog.md](../../../docs/libraries/watchdog.md) for options.
 
 ## Vectors
 
@@ -100,7 +100,7 @@ Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a 
 | Need                                    | Use                                                                                                                                                                                                                                                                                             |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Read one block, live first              | `readWorldBlock(bot, { x, y, z }, memory)` from `mineflayer-world-memory/reader.mjs`. Live blocks win; optional history is read only for unloaded chunks; `source: "unknown"` is not air. Pass `null` as `memory` when you keep no history.                                                     |
-| Remember chunks after they unload       | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`.                                                                                                                                                         |
+| Remember chunks after they unload       | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/libraries/memory-api.md`). History may be stale: check `observedAt`.                                                                                                                                                         |
 | A picture of the terrain or a structure | The `examples/screenshot.mjs` query (boxes, cutaways, views; `pick.mjs` for coordinates), or `capturePrismarineViews` from `mineflayer-world-memory/game/visual/prismarine.mjs` in your own code (see `game/visual/README.md`). Missing cells are not received, not air. |
 | The logs of one tree before chopping    | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`.                                                                                                                                                                                                             |
 | Notice a stuck or looping program       | the game process's watchdog worker (`wait` says when main's thread is stuck); in your own code `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs` (`dog.failure(error)` counts an error you caught). |

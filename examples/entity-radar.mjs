@@ -1,4 +1,5 @@
-/** Read-only participant radar. No hostility assumptions or automatic movement. */
+/** Read-only entity radar: sampleEntities lists entities near the bot; watchEntities
+ * posts changes to a log. No hostility assumptions or automatic movement. */
 import { setTimeout as sleep } from "node:timers/promises";
 
 const vector = (p) => ({ x: p.x, y: p.y, z: p.z });

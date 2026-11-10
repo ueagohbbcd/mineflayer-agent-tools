@@ -1,5 +1,6 @@
 /**
- * Long-horizon checks for the default watchdog script. It sees only what any
+ * Long-horizon trend checks a task or query can run (nothing in the template
+ * does; test/observation/trend-watch.test.mjs covers it). It sees only what any
  * program outside the controller can see (position, controls, collisions,
  * inventory, digs, deaths, own chat), so it is lenient: each finding needs
  * minutes of evidence and is reported once until the situation changes.

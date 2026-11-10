@@ -1,7 +1,7 @@
 # Caller-driven JavaScript world views
 
-`visual.live` adds small synchronous capture/render functions to this package's
-existing visual tools. “Live” means that the caller supplies its current bot or
+`visual.live` (`live.js` / `live.mjs`, code in `lib/live-*.js`) holds small
+synchronous capture/render functions beside the offline [visual tools](visual.md). “Live” means that the caller supplies its current bot or
 local mirror. Importing it opens no sockets, starts no browser, installs no
 listeners, and runs no polling loop. Call it only when a view is useful.
 Ordinary JavaScript still owns goals, movement, retries and actions.
@@ -17,7 +17,7 @@ Ordinary JavaScript still owns goals, movement, retries and actions.
 - Need a view of explicitly retained historical observations:
   `snapshotFromExplored`, followed by `renderMinimap` or `renderOblique`.
 - Need offline cached-world surfaces, layered transparency, biome boundaries,
-  model-aware local 3D, or an underground air cast: keep using the existing
+  model-aware local 3D, or an underground air cast: use the offline
   [visual tools](visual.md) and [local 3D](local-3d.md).
 
 For a candidate tree trunk before chopping, use the optional
@@ -47,8 +47,8 @@ collage, team or match state is added by this library.
 
 `saveRender(render, outputBase)` writes `<outputBase>.png` and
 `<outputBase>.png.json`. This lightweight live helper **overwrites** those two
-paths to support refreshed maps; use a unique base for history. Existing offline
-exporters/renderers retain their no-overwrite protections. Both live files are
+paths to support refreshed maps; use a unique base for history. The offline
+exporters/renderers refuse to overwrite. Both live files are
 ordinary local files; the helper does not provide a cross-file transaction.
 
 ## Capture inputs and source truth
@@ -78,8 +78,8 @@ partial all-air column is never promoted to a known-clear column.
 This is an in-memory, one-top-face view input. It is intentionally **not** the
 persistent `world-memory.surface-map.v1` layered cache format: a lightweight
 mirror may have names without native state IDs, or gaps above a lower known
-block. Neither schema is relabelled as the other. Existing `visual.surface`,
-`exportSurface`, native cache identity checks and offline renderers are unchanged.
+block. Neither schema is relabelled as the other; `visual.surface`,
+`exportSurface` and the offline renderers read only the persistent format.
 
 `surfaceSnapshotFromBot` defaults to budgets of 262,144 columns and 134,217,728
 samples; callers can adjust `maxColumns` and `maxSamples` to suit their work. A full 128×128×384 loaded
@@ -131,10 +131,9 @@ visibility, cave connectivity or a complete map.
 `npm test` covers native chunk/Vec3 inputs, unknown-vs-air, observation history,
 large compact overviews, budgets, direction/UV rotation, mirrored atlas boundaries,
 missing assets and sidecar delivery. Textured unit tests generate a tiny
-self-authored atlas at runtime; no game assets are committed. Existing Python
-visual tests remain `npm run test:visual`.
+self-authored atlas at runtime; no game assets are committed. The Python
+visual tests are `npm run test:visual`.
 
-These MIT generic primitives were contributed from the craft-arena integration.
-Arena retains its player/competition observation composition, markers, browser
-capture integration and action policy. Consumers can reuse the captured data in
-additional bounded read-only perception queries without importing that policy.
+These are generic primitives: player markers, match observation, browser capture
+and action policy belong to the consumer. Captured data can feed other bounded
+read-only [perception queries](perception-queries.md).

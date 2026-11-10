@@ -1,4 +1,4 @@
-/** Sample current game state on demand. Background reporting is the default observer script's. */
+/** Sample current game state on demand as `{state, metadata}`; game/queries/snapshot.mjs prints it. */
 import { sampleObservation } from "./index.mjs";
 export async function observe(bot, options = {}) {
   return {

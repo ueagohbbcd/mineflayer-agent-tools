@@ -32,11 +32,11 @@ Each kind of text has one job. Write a thing once, in the place that owns it, an
 | [docs/self-iteration.md](docs/self-iteration.md) | How the toolkit improves through play: the two loops, where each output goes and when it takes effect, how to tell it helped | contributors |
 | [docs/principles.md](docs/principles.md) | Why the toolkit is shaped this way; read before changing a design, update when a trade-off is decided | contributors |
 | [docs/lessons.md](docs/lessons.md) | What was observed, the evidence, what is done about it; open questions at the end | contributors |
-| [docs/project-scope.md](docs/project-scope.md) | What belongs in this repository and what stays outside | contributors |
+| [docs/project-scope.md](docs/project-scope.md) | What belongs in this repository and what stays outside, and the division of work with craft-arena | contributors |
 | This file | How to work on the repository: layers, document map, checks | contributors |
 | [game/README.md](game/README.md) | How the game process is built: files, conventions, tests | contributors |
 | [game/experimental/README.md](game/experimental/README.md) | Each piece of experimental code and its server record (scenario, result, how many runs) | contributors, playing agents |
-| Module READMEs and `docs/*.md` for the libraries | One module each: what it does, how to call it, where its data lives, limits | contributors, playing agents |
+| [docs/libraries/](docs/libraries/README.md) and module READMEs (`game/observation/`, `game/visual/`) | One module each: what it does, how to call it, where its data lives, limits; the libraries' index, example programs and their tests | contributors, playing agents |
 | [game/template/AGENTS.md](game/template/AGENTS.md) | The player's one page: job loop, task contract, commands, one-line reminders | playing agents, always in context |
 | `skills/*/SKILL.md` | Subject knowledge an agent looks up for what it is doing now | playing agents, on demand |
 | `notes/` in a player project | That world's goal, places, structures, attempts | the playing agent itself |
@@ -52,9 +52,18 @@ Where a new piece of knowledge goes:
 
 Writing rules: state what is decided, in the present tense; write only about what the reader can see in the repository; say "not verified" or "not reproduced" where that is the case.
 
+## Comments
+
+- A source file starts with a header of one to five lines: what the file is for and who calls it.
+- An exported function states its contract (inputs, result, when it throws) when the name does not.
+- Experimental code (`game/experimental/`) carries `Does:` / `Checked:` / `Limits:` above each export, taken from the record tables in its README and from `docs/lessons.md`.
+- A workaround names the observed behaviour it answers.
+- Comments are in English; text shown to the playing model is in Chinese.
+- Comments describe the code as it is, without its history.
+
 ## Who consumes it
 
-craft-arena installs this package (name `mineflayer-world-memory`) from a codeload tarball of a commit (pinned to a commit from before `game/`, which still has `runtime/`); its participant image drops `skills/` but keeps `examples/`, which its own skills point to. The arena also installs the dependencies its images need for parts of this package (for example the renderer's), since participant containers have no network. A change here reaches the arena only when the arena bumps that commit, so run the arena's tests and `npm run verify:server` against a new commit before calling it done.
+craft-arena installs this package under the name `mineflayer-world-memory` from a codeload tarball of one commit of `ueagohbbcd/mineflayer-agent-tools`. Its participant image drops `skills/` and keeps `examples/`, which its own skills point to; it installs the dependencies its images need for parts of this package (for example the renderer's) itself, since participant containers have no network. A change here reaches the arena when the arena bumps that commit. Before calling an arena-affecting change done, bump the commit in a craft-arena checkout and run the arena's own tests against it.
 
 ## Checks
 

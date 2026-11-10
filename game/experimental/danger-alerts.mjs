@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Experimental material (not a routine): the old danger observer. Detects risk
-// signs (lit TNT, swelling creeper, moving projectile, a mob targeting you,
-// big or repeated health loss) and posts them through a `log` such as
-// observers/record.mjs. Kept for its detection logic.
+// Unused material: nothing imports this file and the template does not wire
+// it in. A danger observer that detects risk signs (lit TNT, swelling creeper,
+// moving projectile, a mob targeting you, big or repeated health loss) and
+// posts them through a `log` such as observers/record.mjs.
 //
 // - health_loss (urgent for a large or repeated loss), hurt, critical_health
 //   (urgent) from the game's own health and hurt events;
@@ -10,8 +10,7 @@
 //   swelling creeper, a moving projectile, something targeting you), urgent,
 //   once per entity until its reasons change;
 // - hungry (food at or below 6, again after it was back to 10) and drowning
-//   (air at or below 8 of 20, again after it was back to 16): recorded only;
-//   the low-air rule in main handles air and notifies when it is not enough.
+//   (air at or below 8 of 20, again after it was back to 16): recorded only.
 import { watchObservation } from "../observation/events.mjs";
 import { minimalDangerSample } from "../observation/snapshot.mjs";
 import { createPendingWrites } from "../observers/support.mjs";
@@ -19,7 +18,10 @@ import { createPendingWrites } from "../observers/support.mjs";
 const KEEP = new Set(["health_loss", "hurt", "critical_health"]);
 const STAMP = ["observedAt", "sampledAt", "epoch", "sequence"];
 
-/** Watch one bot; `log` has post(data, { type, key, urgent }) (see recordLog). Returns { close(), flush() }. */
+// Does: records health loss, risk-sign alerts, hunger and low air for one bot
+//   through `log.post(data, { type, key, urgent })`; returns { close(), flush() }.
+// Checked: not checked on a server.
+// Limits: never preempts or wakes; nothing calls it.
 export function startDanger({ bot, log, sampleMs = 1000, sample = minimalDangerSample }) {
   const writes = createPendingWrites((error) =>
     console.error(`danger: log failed: ${error.message}`),

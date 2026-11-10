@@ -52,6 +52,7 @@
     "renderers/*.py",
     "renderers/requirements.txt",
     "docs/*.md",
+    "docs/libraries/*.md",
     "skills/**/*.md",
     "bundle/**/*.md",
     "README.md",

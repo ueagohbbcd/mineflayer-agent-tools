@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+// The game's public entry: the core, the socket, plugin wiring, the observers
+// and reports that game/template/main.mjs imports in one line. Experimental
+// control logic is imported from game/experimental/ directly.
 export { createHost, ExitRequested } from './lib/host.mjs'
 export { summarizeJob, formatJob, formatSummary } from './lib/describe.mjs'
 export { runQuery } from './lib/query.mjs'

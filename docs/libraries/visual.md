@@ -1,14 +1,46 @@
-# Visual-first world memory
+# Visual inspection of the cache
 
-Use a real-texture surface overview to choose a region, inspect its local 3D or
-underground air shape, then ask specific state/count questions. The old summary
-API is auxiliary and remains compatible. The consumer calls the CLI/JS exporter,
-calls an optional renderer, and displays the resulting PNG in its own UI.
-These tools run locally on cached data; `summary()` remains a text-only query.
+Look first, query when needed:
+
+1. **Broad world view:** export a bounded cache area and render its real-texture
+   top-down map. North is up, unknown areas stay masked. Optional thin native
+   biome boundaries preserve the materials; the surface stays grid-free.
+2. **Local detail:** export a small XYZ region for optional textured 3D inspection
+   ([local 3D](local-3d.md)), or select a known-air seed for an underground white
+   air-volume cast. Cave views use a fine **one-block quad grid**, two opposite
+   views and fixed display lighting. White represents known air volume; crop caps
+   mark its selected extent.
+3. **Specific questions:** use `block()` / `chunk()` / `find()` for exact cached
+   state and `summary()` for auxiliary filtering, coverage and freshness
+   ([memory API](memory-api.md)). Use counts and height statistics to guide
+   visual inspection.
+
+The native cache is the source of truth. All views are derived, offline and
+read-only. Unknown areas stay distinct from known air. Cached observations may
+be stale; check their timestamps. `summary()` is a text-only query; rendering
+is a separate call. The consumer calls the CLI/JS exporter, calls an optional
+renderer, and displays the resulting PNG in its own UI.
 
 For caller-driven JavaScript views of an already connected bot or local mirror,
 see [live CPU views](live-visual.md). They reuse this package without adding a
-background service; the offline cache export/render workflow below is unchanged.
+background service.
+
+## Start with the synthetic demo
+
+```sh
+npm install
+node bin/world-memory.js --help
+node examples/make-demo-cache.js /tmp/world-memory-demo
+node bin/world-memory.js surface --config /tmp/world-memory-demo/surface-config.json
+# Optional renderer setup: Python 3.12, NumPy/Pillow; see "Setup and assets" below.
+node bin/world-memory.js render-surface \
+  --input /tmp/world-memory-demo/surface.json \
+  --assets /path/to/your/prismarine-viewer/public \
+  --output /tmp/world-memory-demo/map.png --scale 8 --biomes
+```
+
+The demo uses synthetic blocks. Supply locally installed, legally obtained,
+version-matching viewer assets. Missing assets produce an explicit error.
 
 ## Bare images and separate explanations
 
@@ -50,8 +82,7 @@ config `grid` (default true); surface has no grid mode.
 
 ## Setup and assets
 
-Core: Node 22+ recommended (library itself declares Node >=18; Mineflayer 4.39.0
-used by tests needs Node 22+), `npm install`. The exporter uses the same native
+Core: Node 22 or newer (`engines` in `package.json`), `npm install`. The exporter uses the same native
 Prismarine chunk/block/registry packages as Mineflayer. Tested: prismarine-chunk
 1.41.0, prismarine-block 1.23.0, Minecraft 1.21.1. No separate npm visual framework
 is required for surface export or the white air cast.
@@ -81,7 +112,7 @@ Cave scene rendering additionally requires an explicit local Blender installatio
 with Cycles CPU support. There is no runtime download or permanent rendering
 service. NumPy/Pillow are for extraction/composition; Blender uses its bundled
 Python. Missing executables, modules, fonts or assets produce explicit errors.
-A caller-supplied CJK font supports Chinese presentation labels; bare Chinese names need no font. standard biome IDs/names remain available with the default font.
+A caller-supplied CJK font (`--font`) supports Chinese presentation labels; bare images carry no text and need no font. Standard biome IDs/names are available with the default font.
 
 ## Read a real cache
 
@@ -237,11 +268,11 @@ unavailable: the cache omits some light-only packets, and the dependency's
 `fromJson` empty-light-mask issue remains. Its chunk getter can return zero for
 absent light sections; treat that value as unknown lighting.
 
-`npm test` covers the old API and synthetic native cache identity/unknown/range/
+`npm test` covers the memory API and synthetic native cache identity/unknown/range/
 output rules. `npm run test:visual` checks synthetic PNGs, materials, orientation,
 biome boundaries and air-cast geometry without a Minecraft server. The optional
 Blender smoke is the demo above, with a low-resolution/samples config for fast QA.
 `node benchmark/visual.js` reports bounded synthetic surface/region extraction
 timing and peak RSS on synthetic data. `node benchmark/terrain.js` measures the
-original summary path. Real rendering performance depends on ROI,
+memory summary path. Real rendering performance depends on ROI,
 resolution and assets. No private worlds/images are committed to this repository.

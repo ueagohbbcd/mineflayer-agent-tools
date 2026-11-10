@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 'use strict'
+// The `world-memory` CLI: cache exports (surface, region, local-mesh) run in
+// Node; render commands start the Python renderers or Blender in renderers/.
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
@@ -19,7 +21,7 @@ Exports are read-only and refuse existing outputs or outputs inside the cache.
 Cache config: directory, worldId, version, dimension, output; surface: bounds [xMin,xMax,zMin,zMax],
 optional y [min,max], maxLayers; region: min/max [X,Y,Z] inclusive. Paths resolve relative to config.
 Install renderer dependencies explicitly: Python with NumPy/Pillow; Blender for render-cave.
-Use <command> --help for renderer flags; see docs/visual.md for installation and complete examples.`
+Use <command> --help for renderer flags; see docs/libraries/visual.md for installation and complete examples.`
 async function main () {
   const [command, ...args] = process.argv.slice(2)
   if (!command || command === '--help' || command === 'help') { console.log(help); return }
@@ -39,7 +41,7 @@ async function main () {
   const argv = blender ? ['--background', '--threads', '2', '--python-exit-code', '1', '--python', script, '--', ...args] : [script, ...args]
   const child = spawn(executable, argv, { stdio: 'inherit', shell: false })
   await new Promise((resolve, reject) => {
-    child.on('error', e => reject(new Error(`${executable} unavailable: ${e.message}. Install the optional renderer dependencies in docs/visual.md`)))
+    child.on('error', e => reject(new Error(`${executable} unavailable: ${e.message}. Install the optional renderer dependencies in docs/libraries/visual.md`)))
     child.on('close', (code, signal) => { if (code === 0) resolve(); else reject(new Error(`${command} failed (${signal || code})`)) })
   })
   if (blender) {

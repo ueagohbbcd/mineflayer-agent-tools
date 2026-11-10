@@ -1,6 +1,6 @@
 # World images
 
-This directory draws pictures of the blocks your character has loaded (moved here from craft-arena's `packages/world-visual`). Nothing sends you a picture on its own: run [examples/screenshot.mjs](../../examples/screenshot.mjs) as a query when a decision depends on shape, such as a doorway, a wall or stacked levels.
+This directory draws pictures of the blocks your character has loaded. Nothing sends you a picture on its own: run [examples/screenshot.mjs](../../examples/screenshot.mjs) as a query when a decision depends on shape, such as a doorway, a wall or stacked levels.
 
 The renderer needs the optional dependencies `gl` and `canvas` with their native parts, and an X display (`DISPLAY`, or `xvfb-run` to start one). If they are missing, images fail but everything else keeps working. In a container: `xvfb xauth` plus the cairo/pango libraries node-canvas links (see craft-arena's `infra/Dockerfile.participant`); `gl` 9.0.0-rc.10 is the first with Node 24 prebuilds.
 
@@ -87,7 +87,7 @@ Both renderers take this object (`snapshotFromBot(bot, {bounds})` reads it direc
 
 - A block listed as air is known air. **A cell missing from `blocks` is unknown.**
 - `stateId` must come from the same Minecraft version. Do not guess one. Without it, the version's default state is used and counted in `defaultedStates`. A `stateId` that does not match `name` is rejected.
-- `snapshotFromExplored(bot, {bounds, maxAgeMs})` from `mineflayer-world-memory` builds a snapshot from an explicit observation cache (`bot.knownBlocks` or `bot.knownBlocksIn`). The native bot host does not provide one, so for native bots use live `snapshotFromBot` instead. Each keeps its observation time, and one that is no longer loaded or has changed is marked stale (amber stripes in the top-down picture).
+- `snapshotFromExplored(bot, {bounds, maxAgeMs})` from `mineflayer-world-memory` builds a snapshot from an explicit observation cache (`bot.knownBlocks` or `bot.knownBlocksIn`). A plain Mineflayer bot does not provide one, so use live `snapshotFromBot` there. Each keeps its observation time, and one that is no longer loaded or has changed is marked stale (amber stripes in the top-down picture).
 
 ## Limits
 

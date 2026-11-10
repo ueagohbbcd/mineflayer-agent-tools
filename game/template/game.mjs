@@ -1,2 +1,2 @@
-// Commands for the running main: task / query / cancel / status / stop
+// Commands for the running main: run / wait / cancel / query / status / stop
 import 'mineflayer-world-memory/game/bin/game.mjs'

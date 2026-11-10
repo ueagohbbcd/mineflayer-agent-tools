@@ -88,7 +88,7 @@ export function startExplore({
   };
 }
 
-/** How `mf log` shows explore entries: a sum, not a list. */
+/** `node report.mjs explore` (game/bin/report.mjs): explore entries as a sum, not a list. */
 export function summarize(entries) {
   const lines = [];
   const blocks = entries.filter((entry) => entry.type === "blocks");

@@ -15,7 +15,7 @@
 | `danger-preempt.mjs` | 观察器 `dangerPreempt`：被敌对生物打且血量低于 12 时让 `defend` 抢占，窒息时让 `escape` 抢占；之后结束作业 |
 | `goto.mjs` | `goto(bot, ctx, [x, y, z], { range, stallMs, checks })`：用当前寻路设置走到坐标，每 0.5 秒检查一次；到达按 goal 判定核对脚和脚上一格；连续 3 次无路或 `stallMs`（20 秒）不前进时抛错，错误带寻路最后状态。`checks` 默认为空；给了才在每次检查时设安全点（进阶用法） |
 | `craft.mjs` | `craftChecked(bot, ctx, name, count, table)`：按物品名合成并核对数量增加 |
-| `danger-alerts.mjs` | 旧的危险观察器（TNT、膨胀的苦力怕、飞行物、被盯上），素材，未接入 |
+| `danger-alerts.mjs` | 危险观察器（TNT、膨胀的苦力怕、飞行物、被盯上），素材，未接入 |
 
 ## 实机记录（2026-11-08，本地 1.21.1 官方服务器，普通难度，模板 main）
 

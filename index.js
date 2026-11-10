@@ -1,4 +1,8 @@
 'use strict'
+// Package entry (`require('mineflayer-world-memory')`): createWorldMemory, the
+// optional history of received chunks with exposure analysis and gzip
+// persistence, plus re-exports of readWorldBlock, queries, visual and
+// watchdog. Manual: docs/libraries/memory-api.md.
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const zlib = require('node:zlib')

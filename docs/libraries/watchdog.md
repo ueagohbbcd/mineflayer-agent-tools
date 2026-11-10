@@ -1,6 +1,6 @@
 # Watchdog
 
-A one-line safety net for a Mineflayer control program. It notices when the
+`watchdog(bot, { report })` (`watchdog.js` / `watchdog.mjs`) is a one-line safety net for a Mineflayer control program. It notices when the
 program's bot is stuck, when the program keeps retrying the same thing, and
 when the program's own thread is blocked by a synchronous loop. It only reads
 Mineflayer state and events, never presses keys or changes goals, and hands
@@ -26,21 +26,11 @@ bot's `position` where it applies.
 | `blocked` | Urgent. The program did not return to its event loop for `blockedMs`, so Mineflayer could not act. See below.                                                                                                                         | `seconds`                                             |
 
 The library itself only calls `report`; it does not write records or wake a
-model. `game/` uses only its `blocked` check (the worker writes a notice while
-the main thread is stuck); stuck-like findings there come from main's rule
-table.
+model. `game/` uses only its `blocked` check: `game/lib/server.mjs` starts it
+with `onBlocked` set to `game/lib/blocked-notice.mjs`, which writes
+`.game/blocked.json` while the main thread is stuck.
 
 ## Options
-
-The trend detector (`game/observation/trend-watch.mjs`) is separate. Its `against_wall` warning counts **20 s of
-observed wall contact within a sliding 30 s window**, even if movement keys
-are briefly released. Only samples at most 2 s apart count as contact; an
-unobserved interval is not presumed to be wall contact. It reports once while
-the threshold stays met and re-arms after enough contact ages out. Override
-`wallMs`, `wallWindowMs`, or `wallMaxSampleGapMs` in `createTrendWatch`.
-
-The per-program `watchdog(bot, ...)` below is a separate, shorter-horizon
-helper and retains its own `stuckMs` semantics.
 
 | Option           | Default  | Meaning                                                                                      |
 | ---------------- | -------- | -------------------------------------------------------------------------------------------- |
@@ -68,3 +58,15 @@ updates. When the heartbeat stops for `blockedMs`, the worker writes the
 message to stderr and, when `onBlocked` is given, imports that module and
 calls its default export from the worker. Use it to deliver the urgent report
 through a channel that does not need the main thread.
+
+## Trend detector
+
+`game/observation/trend-watch.mjs` (`createTrendWatch`) is a separate,
+longer-horizon detector fed with samples by its caller; the watchdog's
+`stuckMs` does not apply to it. Its `against_wall` warning counts **20 s of
+observed wall contact within a sliding 30 s window**, even if movement keys
+are briefly released. Only samples at most 2 s apart count as contact; an
+unobserved interval is not presumed to be wall contact. It reports once while
+the threshold stays met and re-arms after enough contact ages out. Override
+`wallMs`, `wallWindowMs`, or `wallMaxSampleGapMs` in `createTrendWatch`. Its
+other findings are listed in [game/observation/README.md](../../game/observation/README.md).

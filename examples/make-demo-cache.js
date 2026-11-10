@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict'
-// Entirely synthetic. Never reads a real cache or connects to Minecraft.
+// Writes a synthetic world-memory cache and surface/region configs into a new
+// directory for the visual demo (docs/libraries/visual.md). Entirely synthetic:
+// never reads a real cache or connects to Minecraft.
 const fs = require('node:fs/promises'), path = require('node:path'), zlib = require('node:zlib')
 const registry = require('prismarine-registry')('1.21.1'), Chunk = require('prismarine-chunk')('1.21.1')
 async function main () {

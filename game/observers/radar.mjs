@@ -45,7 +45,7 @@ export function radarState(radar, { step = 8 } = {}) {
       }
     }
   } else {
-    // Older callers can still pass chunk summaries. A chunk's `nearest` is
+    // A radar without an entity list has only chunk summaries. A chunk's `nearest` is
     // only attributable to a species when that chunk contains one species.
     const ambiguousNearest = new Set();
     for (const chunk of radar?.entityChunks ?? []) {

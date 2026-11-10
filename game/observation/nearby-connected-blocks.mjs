@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// The open space around a cell (flood fill through transparent and non-solid
+// blocks) and the blocks and signs at its edge. Called by the explore observer
+// (game/observers/explore.mjs) and examples/watch-surroundings.mjs.
 import { signSummary } from "./snapshot.mjs";
 
 /** Coarse observation connectivity, deliberately not optical or walkable space. */

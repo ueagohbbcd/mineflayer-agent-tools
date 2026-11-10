@@ -1,19 +1,39 @@
-# Auxiliary memory API
+# World memory
 
-Exploration memory for Mineflayer, tested with Minecraft 1.21.1. Remembers native chunk columns the bot has received, including unloaded columns and other dimensions. Recording is passive: exploration and movement stay with the caller.
+`createWorldMemory(bot, options)` (`index.js`) remembers native chunk columns the bot has received, including unloaded columns and other dimensions, tested with Minecraft Java 1.21.1. Recording is passive: exploration and movement stay with the caller. `readWorldBlock` (`reader.js` / `reader.mjs`) reads one block with the live world first.
+
+## Record received chunks
 
 ```js
 const { createWorldMemory } = require('mineflayer-world-memory')
 const memory = createWorldMemory(bot, {
   directory: './memory', // optional; requires an explicit world identity
-  worldId: 'my-server/my-world',
-  entities: () => entityFacts.summary() // supplied by your entity service
+  worldId: 'my-server/my-world', // unique, stable identity; change on world reset
+  entities: () => entityFacts.summary() // optional; supplied by your entity service
 })
-await memory.refresh()
+await memory.refresh() // wait for current analysis/persistence
 console.log(memory.summary())
 console.log(await memory.find({ name: 'nether_portal', dimension: 'overworld' }))
+// Keep memory attached while the bot receives updates. On shutdown:
 await memory.dispose()
 ```
+
+The cache lives below `directory/base64url(worldId)`, scoped by dimension and
+Minecraft version. Use a distinct identity for each world and after a reset.
+Snapshot the cache for a fully consistent multi-chunk export while a bot writes;
+atomic writes apply to individual files.
+
+## Live first: `readWorldBlock`
+
+For ordinary block queries the live Mineflayer world is authoritative.
+`readWorldBlock(bot, position, memory)` returns a live block first; only a
+remembered chunk that is currently *unloaded* may supply a historical,
+possibly stale block. The result's `source` is `live`, `historical` or
+`unknown` (unknown is not air), with `loaded` and `observedAt`. Pass `null`
+for memory to read without any history. The read is synchronous: await
+`memory.ready` before relying on restored history.
+
+## Summary, exposure and exact reads
 
 `summary()` is synchronous and returns the last completed result plus `pending`. Received changes automatically schedule background analysis. Call `refresh()` to await the current analysis pass; updates arriving during that pass schedule another pass and remain visible as `pending`. It identifies `currentDimension` and reports cumulative `blockCounts` across all remembered dimensions, and per-dimension `blockCounts`, `coverage`, `currentCoverage`, `chunks`, `loadedChunks`, and `lastObservedAt`. Revisions and timestamps reflect received world-state changes. Entity facts come directly from the supplied provider.
 
@@ -53,15 +73,15 @@ and safe standing positions require separate queries.
 Use these filtering hints alongside visual inspection. Check building footprints,
 accessibility, ownership and permission to build locally. A footprint spanning
 chunks needs per-column checks; the summary provides chunk-level statistics.
-Existing exposed `blockCounts` remain independent and include every positive count without truncation.
+Exposed `blockCounts` are independent and include every positive count without truncation.
 
-Heights are collected during the existing classification scan, with no additional
+Heights are collected during the classification scan, with no additional
 native voxel reads; only 256 temporary height/state slots are added per scan.
 Unchanged chunks reuse their surface statistics. Received block/chunk updates
-invalidate them along with the existing analysis. The same `revision`, `pending`,
+invalidate them along with the rest of the analysis. The same `revision`, `pending`,
 `loaded` and `observedAt` freshness rules apply as for other memory results.
-Native gzip persistence is unchanged: old cache files have no new required fields,
-and surface statistics are recomputed from the restored native column. Summary
+Persisted files hold only the native column; surface statistics are
+recomputed from the restored column. Summary
 results and their chunk entries are read-only snapshots.
 
 Exposed means connected by six-neighbor transparent blocks to the top of a known column, plus opaque blocks adjacent to that connected space. The native registry's transparency and empty collision box define transparent space. Connections cross chunk boundaries, including unloaded remembered columns. Unknown space at a side or bottom boundary stays unclassified. Every native block type with a positive exposed count is included, including air. Exposure describes this connectivity, independently of the bot's camera and raycast history. Closed cavities remain hidden until a received update connects them to exposed space. Air positions use compact runs.
@@ -70,11 +90,48 @@ Exposed means connected by six-neighbor transparent blocks to the top of a known
 
 Analysis uses typed per-column component labels, unions neighboring components, and yields to the event loop in batches. Cached unchanged columns reuse their classification. Exposed-component signatures let unchanged columns reuse their position indexes and counts, while connectivity changes propagate through the full known component graph. Large explored worlds consume memory proportional to remembered voxel volume. Raw native columns are gzip persisted atomically by dimension and chunk, scoped to `worldId` and checked against the Minecraft version. Use a distinct world identity for each world and after a reset. Restoration happens asynchronously on creation; loading errors remain in `summary().error` for that memory instance, even after successful analysis. `dispose()` drains received updates and persistence before publishing the final unloaded index.
 
-### Tests and synthetic benchmark
+## Full-column readers without automatic exposure analysis
+
+For a read service or archival observer, use `analysis: 'lazy'` (the default is `'eager'`):
+
+```js
+const memory = createWorldMemory(bot, {
+  analysis: 'lazy',
+  directory: './memory',
+  worldId: 'world/reset/player' // keep independent worlds/resets/players isolated
+})
+await memory.ready // restored files and current received columns, no voxel scan
+const info = memory.chunkInfo({ dimension: 'overworld', x: -1, z: 0 })
+const block = memory.block({ dimension: 'overworld', x: -1, y: -40, z: 3 })
+const columns = memory.chunks({ dimension: 'overworld' })
+await memory.flush() // persist native columns without exposure analysis
+```
+
+`chunkInfo` and `chunks` return detached metadata: chunk coordinates, dimension,
+`loaded`, `observedAt`, version, minimum Y and height. `revision` is the live
+memory revision; `summary().revision` is the separately computed exposure
+revision. A missing column is unknown; known air is a real block. Loaded records
+take native column updates; unload keeps the last column, and the next load
+replaces the complete record. Metadata `observedAt` records the latest captured
+chunk/block event, not the time every unchanged cell was individually received.
+
+Lazy mode saves dirty native columns automatically. It skips automatic
+exposure classification, including on disposal. `refresh()` and `find()` are
+explicit, potentially expensive exposure-analysis requests. `find()` searches
+exposed blocks only; `block()` and `chunk()` include all received blocks, even
+sealed blocks. `ready`, exact reads and metadata reads do not request analysis.
+`chunk()` returns the underlying native object; services should serialize it
+or wrap getters rather than expose mutation.
+
+Every positive exposed block count is kept, including rare blocks. Per-chunk
+height/relief statistics are lightweight hints, with null statistics for
+empty/unknown surfaces. Check buildability locally.
+
+## Tests and synthetic benchmark
 
 Run `npm test` for the native chunk, persistence and terrain regression tests.
 Run `node benchmark/terrain.js` for seven measured fresh-analysis trials (after
 one warmup), each with 16 synthetic 384-block-tall chunks, plus 1,000 cached
 refreshes. Optionally pass a baseline `index.js` path for the same workload.
 The benchmark reports timings and native block-state reads for synthetic chunks.
-Timing is environment-dependent. Both versions should read exactly 1,572,864 states on the first pass and zero on cached refreshes.
+Timing is environment-dependent. A run reads exactly 1,572,864 states on the first pass and zero on cached refreshes.

@@ -11,6 +11,9 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
   signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason) }, { once: true })
 })
 
+// Does: the nearest hostile entity within `range` passing `filter`, as { e, d }, or null.
+// Checked: not checked on a server on its own; defend, idle and fleePoint use it.
+// Limits: hostility is radar-report.mjs's isHostile list.
 export function nearestHostile (bot, range = 16, filter = () => true) {
   const me = bot.entity?.position
   let best = null
@@ -25,6 +28,9 @@ export function nearestHostile (bot, range = 16, filter = () => true) {
 // A creeper is never chased: within CREEPER_RANGE the character keeps away
 // from it whatever its health (meleeing one cost 18 health, 3/3 runs).
 export const CREEPER_RANGE = 7
+// Does: true for a creeper entity.
+// Checked: with defend, creeper 3/3 without damage (2026-11-10).
+// Limits: see defend.
 export const isCreeper = e => e.name === 'creeper'
 // Flee below FLEE_BELOW health; once fleeing, fight again only above
 // FIGHT_ABOVE (or when cornered). Kept per bot across defend runs, so idle
@@ -33,7 +39,12 @@ const FLEE_BELOW = 8
 const FIGHT_ABOVE = 14
 const fleeing = new WeakMap()
 
-/** Fight back with mineflayer-pvp while health allows, otherwise run; keep away from creepers; ends when nothing is near. */
+// Does: fights back with mineflayer-pvp, flees below 8 health until above 14,
+//   keeps 7 blocks from creepers; returns after 3 s with nothing within 12, or 30 s.
+// Checked: 2026-11-10, local 1.21.1, with these flee rules: two zombies 0 deaths
+//   in 9 runs (3 setups); creeper 3/3 without damage; job preempt 3 runs.
+// Limits: without regeneration (food below 18) it flees on: 150 s stand-offs,
+//   81–87 blocks away; open ground not checked; a creeper is never ended.
 export const defend = {
   check: bot => {
     const h = nearestHostile(bot, 6)
@@ -79,12 +90,11 @@ export const defend = {
   }
 }
 
-/**
- * Where to run: of 16 directions, skipping those towards a hostile within
- * 6 blocks, the walkable stretch (up to 10 blocks, one step up or down at a
- * time) whose end is farthest from the nearest hostile. null when no end is
- * more than 3 blocks from one (cornered: fight).
- */
+// Does: where to run: of 16 directions, skipping those towards a hostile within
+//   6 blocks, the walkable stretch (up to 10 blocks) whose end is farthest from
+//   the nearest hostile; null when no end is more than 3 blocks away (cornered).
+// Checked: through defend, 2026-11-10 (see defend).
+// Limits: checked only in the walled arena; open ground not checked.
 export function fleePoint (bot) {
   const me = bot.entity.position.floored()
   const foes = Object.values(bot.entities ?? {}).filter(e => isHostile(e) && e.position?.distanceTo(bot.entity.position) <= 16)
@@ -128,6 +138,9 @@ function standable (bot, x, y, z) {
 
 const WEAPONS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'netherite_axe', 'diamond_axe', 'iron_axe', 'stone_sword', 'stone_axe', 'golden_sword', 'wooden_sword', 'wooden_axe']
 
+// Does: equips the best sword or axe in the inventory (list WEAPONS); no-op if held.
+// Checked: 2026-11-09: defend switched to an iron sword (1 run).
+// Limits: ignores enchantments and durability.
 export async function equipWeapon (bot) {
   const have = bot.inventory.items()
   for (const name of WEAPONS) {
@@ -137,7 +150,11 @@ export async function equipWeapon (bot) {
   }
 }
 
-/** Head inside a solid block: dig it out, or step to a free neighbour. */
+// Does: head inside a solid block: digs it out with the best tool
+//   (mineflayer-tool), or steps back; up to 5 tries.
+// Checked: dirt at head height dug out: 2026-11-08, 2026-11-09 (iron shovel),
+//   2026-11-10 (1 run each).
+// Limits: the step-back branch (a block it cannot dig) is not checked on a server.
 export const escape = {
   check: bot => (headBlocked(bot) ? `头部在 ${bot.blockAt(bot.entity.position.offset(0, 1.6, 0)).name} 里` : null),
   async run (bot, { signal }) {
@@ -159,21 +176,32 @@ export const escape = {
   }
 }
 
+// Does: true when the block at eye height has a full collision box.
+// Checked: through escape and dangerPreempt's in_wall runs (see escape).
+// Limits: see escape.
 export function headBlocked (bot) {
   const head = bot.entity && bot.blockAt(bot.entity.position.offset(0, 1.6, 0))
   return Boolean(head && head.boundingBox === 'block')
 }
 
-/** Something worth eating, by mineflayer-auto-eat's food list and its banned foods. */
+// Does: something worth eating, by mineflayer-auto-eat's food list and its
+//   banned foods, or null when auto-eat is not loaded.
+// Checked: 2026-11-09: auto-eat chose bread over rotten flesh (1 run).
+// Limits: see eat.
 export function foodItem (bot) {
   const ae = bot.autoEat
   if (!ae) return null
   return bot.inventory.items().find(i => ae.foodsByName[i.name] && !ae.opts.bannedFood.includes(i.name))
 }
 
+// Does: eats until food is 18 or there is nothing to eat; `check` fires at food
+//   14 or lower. mineflayer-auto-eat picks the food and puts the held item back.
+// Checked: safepoint restart after eating 2 breads (2026-11-08, 2026-11-10,
+//   1 run each); idle eating at night (2026-11-10, 1 run).
+// Limits: food lagging after eating was reported in play, not reproduced;
+//   it waits up to 2 s for food to change.
 export const eat = {
   check: bot => (bot.food <= 14 && foodItem(bot) ? `饥饿 ${bot.food}` : null),
-  // mineflayer-auto-eat picks the food, equips it and puts the old item back.
   async run (bot, { signal }) {
     signal.throwIfAborted()
     const out = []

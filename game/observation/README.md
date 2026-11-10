@@ -4,7 +4,7 @@ This directory reads the character's state without acting on it: one sample
 of everything (the `snapshot` query), the radar, health and item events, the
 open space around the character, reach maps and place graphs. Tasks and
 queries call these functions; the observers in [../observers/](../observers/)
-(chat, danger, radar, explore) are built on them and write what they find to
+(`status`, `radar`, `explore`) use some of them and write what they find to
 `records/` (read with `node report.mjs`). Paths below are under `<toolkit>/game`.
 
 `null` or `known: false` means no data, not empty; `unknown` blocks are not
@@ -26,7 +26,7 @@ For exact positions use the snapshot query with `--full-entities`, or `entityRad
 
 ## Events
 
-`watchObservation` (what the danger module uses) reports these:
+`watchObservation` (used by `game/experimental/danger-alerts.mjs`, which is not wired into the template) reports these:
 
 | Event | When | Priority |
 | --- | --- | --- |
@@ -36,14 +36,14 @@ For exact positions use the snapshot query with `--full-entities`, or `entityRad
 | `spawn` / `respawn` | the character spawned (`initial` marks the first) | normal |
 | `stale` / `restored` | data older than 5 s / fresh again | normal |
 | `inventory_transition` | out of food, ammunition or solid blocks, or lost an equipped or held item | normal |
-| `objective_inventory` | your count of one of your team's public goal blocks (`briefing.public.goals`) went from 0 to positive or back | normal |
-| `inventory_watch` | your count of an item in `briefing.public.watchItems` went from 0 to positive or back | normal |
+| `objective_inventory` | your count of one of the `objectiveItems` went from 0 to positive or back | normal |
+| `inventory_watch` | your count of one of the `inventoryWatchItems` went from 0 to positive or back | normal |
 
 Events only report; they never stop programs. Item events state what was seen, not that a goal is done.
 
 ## Trend detector
 
-[trend-watch.mjs](trend-watch.mjs) is a trend detector a task or rule can use (the old background module built on it is gone; main's rule table does that job now). Each finding needs minutes of evidence and is reported once until the situation changes:
+[trend-watch.mjs](trend-watch.mjs) is a trend detector a task or query can feed with samples; nothing in the template runs it. Each finding needs minutes of evidence and is reported once until the situation changes:
 
 | Finding | When | Priority |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ Events only report; they never stop programs. Item events state what was seen, n
 | `repeat_chat` | the same own chat message 3 times within 10 minutes | normal |
 | `repeat_death` | 2 deaths within 16 blocks of each other within 10 minutes | **urgent** |
 
-The watchdog every controlling program gets (see the main README) is stricter and sees what the program is trying to do.
+The library watchdog ([docs/libraries/watchdog.md](../../docs/libraries/watchdog.md)) works on a shorter horizon and sees what the program is trying to do.
 
 ## Functions
 
@@ -65,13 +65,13 @@ All read only; import them from `<toolkit>/game/observation/` inside a task or q
 | `sampleObservation(bot, options)` | `index.mjs` | one synchronous sample, the shape of the snapshot's `state` |
 | `observe(bot, options)` | `observe.mjs` | `{state, metadata}`, what the snapshot query prints |
 | `entityRadar(bot, {radius, nameRadius, dropGroupRadius, entities})` | `index.mjs` | the `radar` section alone |
-| `watchObservation(bot, {post, ...thresholds})` | `index.mjs` | the event listeners (table above); `sample()`, `close()`. It reports `death` and `disconnected` (urgent) too, unless `lifecycleEvents: false` (the danger module's setting: the runtime logs those as stops) |
+| `watchObservation(bot, {post, ...thresholds})` | `index.mjs` | the event listeners (table above); `sample()`, `close()`. It reports `death` and `disconnected` (urgent) too, unless `lifecycleEvents: false` (`danger-alerts.mjs`'s setting: the host reports death itself) |
 | `queryTreeCandidate({blockAt, seed})` | `queries.mjs` | the logs, leaf evidence and unknown edges of one tree |
 | `queryEntitiesIntersecting({entities, bounds})` | `queries.mjs` | entities whose box overlaps `bounds`, before placing a block |
 | `reachMap`, `reachGraph`, `terrainProfile`, `aroundSummary` | `reach.mjs` | where Pathfinder can take you and back (a north-up grid), the walkable surface along a line |
 | `findLink`, `placeGraph`, `parseWaypoints` | `place-graph.mjs` | links between named places with Pathfinder's own search; nothing moves |
-| `sampleNearbyConnectedBlocks({blockAt, origin, radius})` | `nearby-connected-blocks.mjs` | the open space around a cell and the blocks and signs at its edge (what the explore module scans) |
-| `createTrendWatch(thresholds)` | `trend-watch.mjs` | the background watchdog's findings from samples you feed it |
+| `sampleNearbyConnectedBlocks({blockAt, origin, radius})` | `nearby-connected-blocks.mjs` | the open space around a cell and the blocks and signs at its edge (what the `explore` observer scans) |
+| `createTrendWatch(thresholds)` | `trend-watch.mjs` | the trend findings above from samples you feed it |
 
 `sampleObservation` options: `fullItems`, `fullEntities`, `fullLocal`, `local`, `loadedSigns`, `radar`, `localRadius` (2), `blockLimit` (16), `signLimit` (16), `entityLimit` (12), `entityRadius`, `entityAttentionRadius` (16), `staleAfterMs` (5000), `teams`. `watchObservation` thresholds: `healthBurstMs` (250), `criticalHealth` (6), `criticalHysteresis` (2), `damageWindowMs` (2000), `urgentDamageLoss` (4), `sustainedDamageEvents` (3), `sustainedDamageLoss` (3), `damageCooldownMs` (5000), `damageRecovery` (2), `objectiveItems`, `inventoryWatchItems`.
 

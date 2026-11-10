@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Generic visual primitives contributed from the craft-arena integration.
+// visual.live: caller-driven captures and CPU renders of a connected bot or
+// local mirror (lib/live-*.js). Manual: docs/libraries/live-visual.md.
 /** Synchronous, caller-driven views of current bot data. No background service. */
 module.exports = {
   ...require("./lib/live-raster.js"),
