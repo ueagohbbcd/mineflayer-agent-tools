@@ -372,3 +372,88 @@ test('a host created after spawn starts idle by itself', async () => {
   const { host } = setup({ idle })
   await until(() => host.controller?.kind === 'idle')
 })
+
+// ---- onEvent: the order of what an observer keeping a timeline receives ----
+function withEvents (opts = {}) {
+  const got = []
+  const idle = async (bot, ctx) => new Promise(resolve => ctx.signal.addEventListener('abort', resolve))
+  const s = setup({ idle, onEvent: e => got.push(e), ...opts })
+  const seen = () => got.map(e => e.type + (e.kind ? `:${e.kind}` : ''))
+  return { ...s, got, seen }
+}
+
+test('onEvent: a finished job, then a wait', async () => {
+  const { host, file, run, got, seen } = withEvents()
+  await until(() => host.controller?.kind === 'idle')
+  got.length = 0
+  const r = await run(file('ok', 'export default async () => 42'))
+  await until(() => host.controller?.kind === 'idle' && r.result())
+  await host.waitForReport()
+  assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'settle:task', 'job_end', 'wake', 'control:idle', 'report'])
+  assert.deepEqual(got[0].args, [])
+  assert.equal(got[2].attempt, 1)
+  assert.equal(got[4].ok, true)
+  assert.equal(got[4].end, '完成')
+  assert.match(got[7].text, /j1-ok 完成/)
+  assert.equal(got[7].waiters, 1)
+})
+
+test('onEvent: a preempt with then end', async () => {
+  const reflexes = { defend: { run: async () => { await sleep(20); return 'safe' } } }
+  const { host, file, run, got, seen } = withEvents({ reflexes })
+  await until(() => host.controller?.kind === 'idle')
+  got.length = 0
+  const r = await run(file('mine', `export default async (bot, ctx) => {
+    await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
+  }`))
+  await sleep(20)
+  host.preempt('defend', { reason: 'zombie' })
+  await until(() => host.controller?.kind === 'idle' && r.result())
+  assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'preempt', 'wake', 'settle:task', 'control:reflex', 'settle:reflex', 'job_end', 'wake', 'control:idle'])
+  const p = got[3]
+  assert.deepEqual([p.reflex, p.then, p.reason, p.by, p.job], ['defend', 'end', 'zombie', 'observer', 'j1-mine'])
+  assert.match(got[7].outcome, /safe/)
+  assert.equal(got[8].preemptedBy, 'defend')
+})
+
+test('onEvent: cancel', async () => {
+  const { host, file, run, got, seen } = withEvents()
+  await until(() => host.controller?.kind === 'idle')
+  got.length = 0
+  const r = await run(file('long', `export default async (bot, ctx) => {
+    await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
+  }`))
+  await sleep(10)
+  await host.cancel()
+  await until(() => host.controller?.kind === 'idle' && r.result())
+  assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'settle:task', 'job_end', 'wake', 'control:idle'])
+  assert.match(got[3].outcome, /已取消/)
+  assert.equal(got[4].ended, 'cancelled')
+})
+
+test('onEvent: death and respawn', async () => {
+  const { host, bot, file, run, got, seen } = withEvents()
+  await until(() => host.controller?.kind === 'idle')
+  got.length = 0
+  const r = await run(file('walk', `export default async (bot, ctx) => {
+    await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
+  }`))
+  await sleep(10)
+  bot.health = 0
+  bot.emit('death')
+  await until(() => r.result())
+  await sleep(50)
+  bot.health = 20
+  bot.emit('spawn')
+  await until(() => host.controller?.kind === 'idle')
+  assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'death', 'wake', 'settle:task', 'job_end', 'wake', 'respawn', 'wake', 'control:idle'])
+  assert.deepEqual([got[3].job, got[3].controller, got[3].where], ['j1-walk', 'task j1-walk', '0 64 0'])
+  assert.equal(got[6].ended, 'death')
+})
+
+test('onEvent: a listener that throws does not disturb the host', async () => {
+  const { file, run } = setup({ onEvent: () => { throw new Error('listener') } })
+  const r = await run(file('ok', 'export default async () => 1'))
+  await until(() => r.result())
+  assert.equal(r.result().ok, true)
+})

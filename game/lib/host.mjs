@@ -4,11 +4,14 @@
 // reflex or idle), one exit flow, wake and reports. It knows nothing about
 // the game; stopping the bot's own actions is the injected `cleanup`.
 //
-//   const host = createHost(bot, { dir, reflexes, idle, cleanup })
+//   const host = createHost(bot, { dir, reflexes, idle, cleanup, onEvent })
 //
 // reflexes: { name: { check?(bot) → reason|null, run(bot, ctx) } }. A task
 // offers safepoints with ctx.safepoint({ name: 'restart' | 'end' }); an
-// observer preempts with host.preempt(name, { then, reason }).
+// observer preempts with host.preempt(name, { then, reason }). onEvent(e) gets
+// a small plain object at each step ({ type: 'job' | 'control' | 'preempt' |
+// 'settle' | 'stuck' | 'job_end' | 'death' | 'respawn' | 'wake' | 'report', ... })
+// for an observer that keeps a timeline; what it throws is ignored.
 //
 // Exit flow, shared by cancel, replace, preempt and death: the requester
 // records what comes next (`next`) and the controller's signal aborts → its
@@ -43,9 +46,11 @@ export function createHost (bot, {
   cleanup = () => {},
   graceMs = 5000,
   reportTimeoutMs = 3000,
-  log = console.log
+  log = console.log,
+  onEvent = null
 } = {}) {
   if (!dir) throw new Error('createHost needs { dir }')
+  const emit = (type, fields) => { try { onEvent?.({ type, ...fields }) } catch {} }
   const reports = [] // [name, fn]
   // The controller: { kind: 'task'|'reflex'|'idle', name, job, ac, cleanups,
   // phase: 'running'|'exiting'|'stuck'|'done', why, confirms, then, reason }
@@ -68,6 +73,7 @@ export function createHost (bot, {
 
   function wake (reason) {
     wakeGen++
+    emit('wake', { reason })
     if (reason) {
       const line = `[${new Date().toISOString().slice(11, 19)}] ${reason}`
       if (!reasons.some(r => r.slice(11) === line.slice(11))) reasons.push(line)
@@ -112,6 +118,7 @@ export function createHost (bot, {
         const batch = [...waiters]
         waiters.clear()
         const report = await collect()
+        emit('report', { text: report, waiters: batch.length })
         for (const w of batch) w(report)
       }
     })().finally(() => {
@@ -149,7 +156,9 @@ export function createHost (bot, {
     // After a death the bot may already stand at its respawn point; the death
     // position is in the end word instead.
     j.position = p && result.ended !== 'death' ? [p.x, p.y, p.z].map(n => Math.round(n * 10) / 10) : null
-    emitJob('result', { summary: summarizeJob(j) }, j)
+    const summary = summarizeJob(j)
+    emit('job_end', summary)
+    emitJob('result', { summary }, j)
     j.sinks.clear()
     wake(`作业 ${j.id} ${endWord(j)}`)
   }
@@ -166,11 +175,12 @@ export function createHost (bot, {
   function start (kind, name, j, run, extra = {}) {
     const ctrl = { kind, name, job: j, ac: new AbortController(), cleanups: [], phase: 'running', confirms: [], ...extra }
     controller = ctrl
+    emit('control', { kind, name, job: j?.id, attempt: kind === 'task' ? j.attempts : undefined })
     const ctx = {
       signal: ctrl.ac.signal,
       cleanup: fn => { ctrl.cleanups.push(fn) },
       wake,
-      preempt: (reflex, opts) => preempt(reflex, opts)
+      preempt: (reflex, opts) => preempt(reflex, opts, kind)
     }
     Promise.resolve()
       .then(() => run(ctx, ctrl))
@@ -212,6 +222,7 @@ export function createHost (bot, {
       `${last ? `；它最后输出的一行：${last}` : ''}。任务要做到：${EXIT_RULE}。` +
       '现在要恢复就重启游戏进程：node game.mjs stop，然后重新启动 main。'
     log(msg)
+    emit('stuck', { kind: ctrl.kind, name: ctrl.name, why: ctrl.why, last })
     emitJob('event', msg, ctrl.job)
     wake(msg)
     for (const resolve of ctrl.confirms.splice(0)) resolve(false)
@@ -222,6 +233,7 @@ export function createHost (bot, {
     const asked = ctrl.phase !== 'running'
     const wasStuck = ctrl.phase === 'stuck'
     ctrl.phase = 'done'
+    emit('settle', { kind: ctrl.kind, name: ctrl.name, stuck: wasStuck, outcome: asked ? `退出（${ctrl.why}）` : outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${errorText(outcome.error)}` })
     await runCleanups(ctrl)
     controller = null
     if (wasStuck) wake(`${describeController(ctrl)} 终于退出了`)
@@ -319,7 +331,7 @@ export function createHost (bot, {
       let reason
       try { reason = await reflex.check(bot) } catch (error) { reason = null; log(`反射 ${name} 检查出错：${errorText(error)}`) }
       if (reason) {
-        preempt(name, { then, reason: text(reason) })
+        preempt(name, { then, reason: text(reason) }, 'safepoint')
         throw new ExitRequested(`抢占：${name}`)
       }
     }
@@ -330,7 +342,7 @@ export function createHost (bot, {
    * entry afterwards (a new attempt); 'end' (the default) ends the job and
    * goes to idle.
    */
-  function preempt (name, { then = 'end', reason = '' } = {}) {
+  function preempt (name, { then = 'end', reason = '' } = {}, by = 'observer') {
     if (!reflexes[name]) return { ok: false, error: `没有名为 ${name} 的反射` }
     if (!alive) return { ok: false, error: '角色已死亡' }
     if (next) return { ok: false, error: `退出进行中（${next.why}）` }
@@ -339,6 +351,7 @@ export function createHost (bot, {
     const thenWord = !j ? '' : then === 'restart' ? '，之后从入口重跑任务' : '，之后结束作业、转 idle'
     const msg = `${name} 抢占（${reason || '无原因'}）${thenWord}`
     log(msg)
+    emit('preempt', { reflex: name, then, reason, by, job: j?.id })
     emitJob('event', `[抢占] ${msg}`, j)
     wake(msg)
     const done = requestExit({ kind: 'preempt', why: `抢占：${name}`, reflex: { name, then, reason } })
@@ -360,6 +373,7 @@ export function createHost (bot, {
       log: [],
       sinks: new Set(sink ? [sink] : [])
     }
+    emit('job', { id: j.id, file: abs, args })
     const replacing = job?.status === 'running'
     const intent = { kind: 'replace', why: replacing ? '被新作业替换' : '开始新作业', end: { ok: false, ended: 'replaced' }, start: j }
     if (!(await requestExit(intent))) {
@@ -389,6 +403,7 @@ export function createHost (bot, {
   bot.on('death', () => {
     alive = false
     const where = here()
+    emit('death', { where, job: job?.status === 'running' ? job.id : null, controller: controller && `${controller.kind} ${controller.name}` })
     if (controller || job?.status === 'running') {
       requestExit({ kind: 'death', why: '死亡', end: { ok: false, ended: 'death', where } })
     }
@@ -397,6 +412,7 @@ export function createHost (bot, {
   bot.on('spawn', () => {
     if (alive || (bot.health ?? 20) <= 0) return
     alive = true
+    emit('respawn', { where: here() })
     wake(`重生，位置 ${here()}`)
     setTimeout(startIdle, 500)
   })

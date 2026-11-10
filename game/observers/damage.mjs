@@ -9,6 +9,8 @@ export function watchDamage (bot) {
   let types = []
   const hits = []
   const listeners = []
+  let diedAt = 0
+  bot.on('death', () => { diedAt = Date.now() })
   bot._client.on('registry_data', packet => {
     if (packet?.id === 'minecraft:damage_type' && Array.isArray(packet.entries)) {
       types = packet.entries.map(e => String(e.key).replace('minecraft:', ''))
@@ -22,9 +24,10 @@ export function watchDamage (bot) {
       type: types[packet.sourceTypeId] ?? `type#${packet.sourceTypeId}`,
       source: source ? (source.username ?? source.name) : null
     }
-    // Health arrives in its own packet right after; read it then.
+    // Health arrives in its own packet right after; read it then. After a
+    // lethal hit the bot may have respawned by then: that hit left 0.
     setTimeout(() => {
-      hit.health = Math.round((bot.health ?? 0) * 10) / 10
+      hit.health = diedAt > hit.at - 200 ? 0 : Math.round((bot.health ?? 0) * 10) / 10
       hits.push(hit)
       if (hits.length > 200) hits.shift()
       for (const fn of listeners) {

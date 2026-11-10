@@ -67,6 +67,7 @@ Idle keeps the character alive: it fights back when hit, gets its head out of bl
 | `node game.mjs status` | who controls the character, the current job |
 | `node game.mjs stop` | end main (start it again in the background) |
 | `node report.mjs [name] [minutes]` | what the recorders kept (`explore`, `radar`); reads files only |
+| `node report.mjs review` | what happened in this game so far, from the journal: deaths, jobs, preempts |
 
 ## Where to look
 
@@ -82,6 +83,7 @@ In this order, as far as you need:
 - Pathfinding walks only. After digging down, a job that walks back out fails with no path: dig stairs or pillar up in the task, or allow digging in that task's movements.
 - Nothing preempts a job for drowning or a breaking tool: check air and the held tool in tasks that mine, especially near water.
 - If `wait` or `status` says main is not running, it crashed: start it again and look at its log.
+- After a death or a failed job, append one line to `notes/log.md`: what you were trying and what you will change.
 
 ## main.mjs is yours
 

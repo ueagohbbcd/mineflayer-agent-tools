@@ -150,3 +150,12 @@
 - 布置：`run tasks/busy-forever.mjs`（死循环，不回事件循环）；`status`；`stop`。
 - 预期：`status` 连不上或报告主线程卡住（`.game/blocked.json`）；`stop` 用其中的 pid 结束 main，服务器上 Scen 下线；之后能正常启动 main。
 - 通过：`stop` 的输出和 `list`。
+
+## 五、时间线和回顾
+
+### 24. 一局短游戏的时间线（`records/journal.jsonl`）和 `report.mjs review`
+- 目的：时间线如实记下一局，回顾里的每个数字都能用自己做过的事和服务器日志核对。
+- 布置：新测试项目（`records/` 为空），竞技场，`scoreboard objectives add jDeaths deathCount`。约 5 分钟里依次：`run tasks/example.mjs …` 完成；`run tasks/broken.mjs`（抛错）；自写一个走路任务，运行，改一行再运行；`run tasks/patrol.mjs …` 几秒后 `cancel`；`FIGHT_NO_REGEN=1 FIGHT_LEGS=2 fight.mjs zombie goto 1 iron_sword 11`（场景 10，`defend` 抢占）；作业中 RCON `kill`；中间穿插几次 `wait`（含一次私聊唤醒）；作业中 `kill -9` main，再启动 main 跑一个短作业；`node game.mjs stop`，再启动，作业中 `damage` 两次后 `kill`。之后 `node report.mjs review` 和 `node report.mjs review --json`。
+- 预期：main 启动次数等于服务器日志里 joined 的次数，`kill -9` 那次算一次崩溃，`stop` 那次有 `main_stop`（退出码 0）；死亡次数和时间与日志的 "was killed" 和 `jDeaths` 相同，每次死亡有位置、致命伤害类型、当时的作业和控制者，死前 60 秒的事件里有那两次 `damage`；作业按结束方式的计数与 `run` 的最后一行逐个对得上；`records/tasks/` 里改过的任务有两份、没改过的只有一份；`wait` 送达次数等于实际调用 `wait` 并拿到报告的次数（`fight.mjs` 自己调用一次）；受伤计数与 `fight-results.jsonl` 的血量变化和 RCON 的 `damage` 次数相同。
+- 通过：逐项核对后，在试验区记录里写下回顾原文的要点和核对结果。
+

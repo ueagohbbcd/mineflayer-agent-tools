@@ -5,15 +5,19 @@
 //
 //   node report.mjs                      one line per source: entries, time span
 //   node report.mjs <source> [minutes]   that source over the last N minutes (default 10)
+//   node report.mjs review [minutes] [--json]   one page about this game from
+//                                        the journal (default: all of it)
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { recordsDir } from '../lib/files.mjs'
 import { clock } from '../observers/support.mjs'
+import { formatReview, review } from '../observers/review.mjs'
 import { genericLines } from '../observers/view.mjs'
 
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
-const [source, minutesArg] = process.argv.slice(2)
+const json = process.argv.includes('--json')
+const [source, minutesArg] = process.argv.slice(2).filter(a => a !== '--json')
 const records = recordsDir(dir)
 
 function read (name) {
@@ -38,7 +42,14 @@ if (!source) {
     const span = entries.length ? `${clock(entries[0].at)}–${clock(entries.at(-1).at)}` : ''
     console.log(`${name}: ${entries.length} 条${urgent ? `（${urgent} 条 urgent）` : ''} ${span}`)
   }
-  console.log('看某一项：node report.mjs <名称> [分钟]')
+  console.log('看某一项：node report.mjs <名称> [分钟]；这一局的回顾：node report.mjs review')
+  process.exit(0)
+}
+
+if (source === 'review') {
+  const since = Number(minutesArg) ? Date.now() - Number(minutesArg) * 60000 : 0
+  const r = review(read('journal').filter(e => Date.parse(e.at) >= since))
+  console.log(json ? JSON.stringify(r, null, 2) : formatReview(r))
   process.exit(0)
 }
 

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import {
   createHost, openEntry, serve, compatibleMinecraftOptions, fixCrafting, loadPlugins, stopGameActions,
-  watchDamage, watchChat, statusReport, radarReport, recordLog, startExplore, startRadar
+  watchDamage, watchChat, statusReport, radarReport, recordLog, startJournal, startExplore, startRadar
 } from 'mineflayer-world-memory/game/index.mjs'
 // Experimental: control logic still being tried out (game/experimental/README.md).
 import { defend, escape, eat } from 'mineflayer-world-memory/game/experimental/reflexes.mjs'
@@ -35,7 +35,9 @@ const damage = watchDamage(bot) // right after createBot: damage type names arri
 fixCrafting(bot) // bot.craft clears the grid after itself (1.21.1 leftovers)
 // Pathfinder (walking only: no digging, no towering), pvp, auto-eat,
 // armor-manager, tool, collectblock; see game/lib/plugins.mjs.
-await loadPlugins(bot)
+const plugins = await loadPlugins(bot)
+// The game's timeline in records/journal.jsonl: `node report.mjs review`.
+const journal = startJournal({ bot, dir, damage, plugins })
 bot.on('kicked', reason => console.log('被踢出：', reason))
 bot.on('end', reason => {
   console.log('连接已断开：', reason)
@@ -53,7 +55,8 @@ const host = createHost(bot, {
   dir,
   reflexes: { defend, escape, eat },
   idle,
-  cleanup: stopGameActions
+  cleanup: stopGameActions,
+  onEvent: journal.event
 })
 
 // Report functions: their output is joined into what `game.mjs wait` prints.
