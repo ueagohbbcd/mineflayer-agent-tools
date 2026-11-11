@@ -10,7 +10,7 @@ export function radarReport (bot, { hostileRange = 24, playerRange = 64 } = {}) 
     for (const e of Object.values(bot.entities ?? {})) {
       if (e === bot.entity || !e.position) continue
       const d = e.position.distanceTo(me)
-      if (e.type === 'player' && d <= playerRange) players.push(`${e.username} ${Math.round(d)} 格`)
+      if (e.type === 'player' && d <= playerRange) players.push(`${e.username} ${Math.round(d)} blocks away`)
       else if (isHostile(e) && d <= hostileRange) {
         const m = mobs.get(e.name) ?? { count: 0, nearest: Infinity }
         m.count++
@@ -18,10 +18,10 @@ export function radarReport (bot, { hostileRange = 24, playerRange = 64 } = {}) 
         mobs.set(e.name, m)
       }
     }
-    const list = [...mobs].sort((a, b) => a[1].nearest - b[1].nearest).map(([n, m]) => `${n}×${m.count}（最近 ${Math.round(m.nearest)} 格）`)
+    const list = [...mobs].sort((a, b) => a[1].nearest - b[1].nearest).map(([n, m]) => `${n}×${m.count} (nearest ${Math.round(m.nearest)} blocks away)`)
     return [
-      `${hostileRange} 格内敌对生物：${list.join(', ') || '无'}`,
-      ...(players.length ? [`${playerRange} 格内玩家：${players.join(', ')}`] : [])
+      `hostile mobs within ${hostileRange} blocks: ${list.join(', ') || 'none'}`,
+      ...(players.length ? [`players within ${playerRange} blocks: ${players.join(', ')}`] : [])
     ].join('\n')
   }
 }

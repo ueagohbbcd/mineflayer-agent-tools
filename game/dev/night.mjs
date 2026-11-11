@@ -77,7 +77,7 @@ while (Date.now() - t0 < Number(minutes) * 60000) {
 }
 const v1 = await vitals()
 const mobs = (await rcon([`execute as ${NAME} at @s if entity @e[type=#minecraft:undead,distance=..24]`, `execute as ${NAME} at @s if entity @e[type=spider,distance=..24]`, `execute as ${NAME} at @s if entity @e[type=creeper,distance=..24]`]))
-const report = (await status()).pending ? (await request({ type: 'wait' }))?.text ?? '' : '（没有唤醒）'
+const report = (await status()).pending ? (await request({ type: 'wait' }))?.text ?? '' : '(nothing woke)'
 await rcon(['gamerule doMobSpawning false', 'gamerule mobGriefing false'])
 const row = {
   at: new Date().toISOString(), start: start.map(r1), seconds: r1((Date.now() - t0) / 1000), died,

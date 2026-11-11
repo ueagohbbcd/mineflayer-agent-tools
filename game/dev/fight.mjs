@@ -4,7 +4,7 @@
 // query through the socket and counts the mobs with RCON. What it prints is
 // what it saw; it decides nothing for the bot.
 //
-//   node <toolkit>/game/dev/fight.mjs <mob> <goto|idle> [runs=3] [sword=iron_sword] [health=20]
+//   node <toolkit>/game/dev/fight.mjs <mob> <patrol|idle> [runs=3] [sword=iron_sword] [health=20]
 //   mob: skeleton | spider | zombie | zombie2 | creeper
 //   FIGHT_NO_REGEN=1: gamerule naturalRegeneration false for the run, so a
 //   low starting health stays low until the fight (default: regeneration on)
@@ -12,7 +12,7 @@
 // Arena (SCENARIOS.md): stone floor y=120, x -51..29, z -206..-126, glass
 // walls. Each run sets midnight, no daylight cycle and no natural spawning
 // (undead do not burn, spiders attack, no other mobs join). The bot starts at
-// A, mobs are summoned 12 blocks east of A; in goto mode the bot walks
+// A, mobs are summoned 12 blocks east of A; in patrol mode the bot walks
 // A → B → A … (patrol.mjs, FIGHT_LEGS legs, default 6, about 70 blocks each).
 // Each run appends one JSON line to fight-results.jsonl and saves the `wait`
 // report after the run to fight-reports.log.
@@ -27,7 +27,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const dir = path.resolve(process.env.GAME_DIR ?? '.')
 const NAME = process.env.MF_USERNAME ?? 'Scen'
 const [mob, mode = 'idle', runsArg = '3', sword = 'iron_sword', healthArg = '20'] = process.argv.slice(2)
-const LEGS = Number(process.env.FIGHT_LEGS ?? 6) // patrol legs in goto mode
+const LEGS = Number(process.env.FIGHT_LEGS ?? 6) // patrol legs in patrol mode
 const A = [-46.5, 121, -165.5]
 const B = [24, 121, -166]
 const KEEP = '{PersistenceRequired:1b}'
@@ -38,8 +38,8 @@ const MOBS = {
   zombie2: { type: 'zombie', summon: [`summon zombie -34.5 121 -167.5 ${KEEP}`, `summon zombie -34.5 121 -163.5 ${KEEP}`] },
   creeper: { type: 'creeper', summon: [`summon creeper -34.5 121 -165.5 ${KEEP}`] }
 }
-if (!MOBS[mob] || !['goto', 'idle'].includes(mode)) {
-  console.log('用法：node fight.mjs <skeleton|spider|zombie|zombie2|creeper> <goto|idle> [runs] [sword] [health]')
+if (!MOBS[mob] || !['patrol', 'idle'].includes(mode)) {
+  console.log('usage: node fight.mjs <skeleton|spider|zombie|zombie2|creeper> <patrol|idle> [runs] [sword] [health]')
   process.exit(1)
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -96,7 +96,7 @@ for (let run = 1; run <= Number(runsArg); run++) {
   if ((await status()).pending) await request({ type: 'wait' })
   let runMsgs = []
   let jobEnd = null
-  if (mode === 'goto') {
+  if (mode === 'patrol') {
     request({ type: 'run', file: path.join(dir, 'tasks/patrol.mjs'), args: [...A, ...B, LEGS].map(String) }, m => {
       if (m.type === 'log' || m.type === 'event') runMsgs.push(m.line ?? m.text)
       if (m.type === 'result') jobEnd = m.summary.end
@@ -130,7 +130,7 @@ for (let run = 1; run <= Number(runsArg); run++) {
     hmin = Math.min(hmin, v.health)
     maxDist = Math.max(maxDist, dist(v.position, start))
     const left = await mobCount()
-    // Over when every mob is gone and no reflex is fighting for 2 s; a goto
+    // Over when every mob is gone and no reflex is fighting for 2 s; a patrol
     // job still walking is cancelled at the next set-up.
     if (left === 0 && s.controller?.kind !== 'reflex') { calmSince ??= Date.now(); if (Date.now() - calmSince > 2000) break } else calmSince = null
   }
@@ -140,12 +140,12 @@ for (let run = 1; run <= Number(runsArg); run++) {
   if (died) await waitUntil(async () => (await status()).alive, 30000)
   await sleep(1000)
   // Only when something woke: a wait with nothing pending would block.
-  const report = (await status()).pending ? (await request({ type: 'wait' }))?.text ?? '' : '（这一轮没有唤醒）'
+  const report = (await status()).pending ? (await request({ type: 'wait' }))?.text ?? '' : '(nothing woke in this run)'
   const row = {
-    at: new Date().toISOString(), mob, mode, sword, run, legs: mode === 'goto' ? LEGS : undefined,
+    at: new Date().toISOString(), mob, mode, sword, run, legs: mode === 'patrol' ? LEGS : undefined,
     healthStart: r1(v0.health), healthMin: r1(hmin), healthEnd: v1 ? r1(v1.health) : 0, died,
     mobsLeft: left, seconds, maxDistFromStart: r1(maxDist), endDistFromStart: v1 ? r1(dist(v1.position, start)) : null,
-    controllers: seen, acts, mobsKilled: MOBS[mob].summon.length - left, jobEnd: jobEnd ?? (mode === 'goto' ? '跑完时仍在进行' : null), runLines: runMsgs.filter(l => l.startsWith('[')).slice(0, 6), samples
+    controllers: seen, acts, mobsKilled: MOBS[mob].summon.length - left, jobEnd: jobEnd ?? (mode === 'patrol' ? 'still running when the run ended' : null), runLines: runMsgs.filter(l => l.startsWith('[')).slice(0, 6), samples
   }
   fs.appendFileSync(path.join(dir, 'fight-results.jsonl'), JSON.stringify(row) + '\n')
   fs.appendFileSync(path.join(dir, 'fight-reports.log'), `\n===== ${row.at} ${mob} ${mode} ${sword} ${healthArg} run ${run}\n${report}\n`)

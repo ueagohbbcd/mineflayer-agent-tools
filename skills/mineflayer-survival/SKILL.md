@@ -19,4 +19,4 @@ Right-click a bed with `await bot.activateBlock(bedBlock)` from within about two
 
 ## In the game process
 
-Fighting back, eating and getting out of blocks are main's reflexes (`defend`, `eat`, `escape` in [reflexes.mjs](../../game/experimental/reflexes.mjs)), built on mineflayer-pvp, mineflayer-auto-eat and mineflayer-tool. When they preempt a task is in `mineflayer-game`. The `wait` report's 受伤 section names what hurt you (mob, suffocation, fall, drowning).
+Fighting back, eating and getting out of blocks are main's reflexes (`fightOrFlee`, `eatWhenHungry`, `digHeadFree` in [reflexes.mjs](../../game/experimental/reflexes.mjs)), built on mineflayer-pvp, mineflayer-auto-eat and mineflayer-tool. When they preempt a task is in `mineflayer-game`. The `wait` report's damage section names what hurt you (mob, suffocation, fall, drowning).

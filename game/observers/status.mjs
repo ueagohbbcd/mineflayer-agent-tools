@@ -23,15 +23,15 @@ export function statusReport (bot) {
 
   return () => {
     const lines = []
-    if (deaths.length) lines.push(`上次报告以来死亡 ${deaths.length} 次：${deaths.join('；')}${respawns.length ? `，重生在 ${respawns.at(-1)}` : ''}（掉落物 5 分钟后消失）`)
+    if (deaths.length) lines.push(`died ${deaths.length} ${deaths.length === 1 ? 'time' : 'times'} since the last report: at ${deaths.join('; at ')}${respawns.length ? `; respawned at ${respawns.at(-1)}` : ''} (dropped items vanish after 5 minutes)`)
     deaths.length = 0
     respawns.length = 0
     const p = bot.entity?.position
-    lines.push(`血 ${round(bot.health)}/20 饥饿 ${bot.food}/20 氧气 ${oxygenOf(bot) ?? 20}/20`)
+    lines.push(`health ${round(bot.health)}/20 food ${bot.food}/20 air ${oxygenOf(bot) ?? 20}/20`)
     lines.push(timeLine(bot.time?.timeOfDay))
-    if (p) lines.push(`位置 ${[p.x, p.y, p.z].map(n => Math.round(n)).join(' ')}（${String(bot.game?.dimension ?? '').replace('minecraft:', '')}）`)
+    if (p) lines.push(`position ${[p.x, p.y, p.z].map(n => Math.round(n)).join(' ')} (${String(bot.game?.dimension ?? '').replace('minecraft:', '')})`)
     const armor = [5, 6, 7, 8].map(s => bot.inventory?.slots?.[s]?.name).filter(Boolean)
-    lines.push(`手持 ${bot.heldItem?.name ?? '空'}；护甲 ${armor.join(', ') || '无'}`)
+    lines.push(`held ${bot.heldItem?.name ?? 'nothing'}; armor ${armor.join(', ') || 'none'}`)
     const now = countItems(bot)
     if (lastInventory) {
       const diff = []
@@ -39,9 +39,9 @@ export function statusReport (bot) {
         const d = (now[name] ?? 0) - (lastInventory[name] ?? 0)
         if (d) diff.push(`${name} ${d > 0 ? '+' : ''}${d}`)
       }
-      lines.push(`背包变化：${diff.join(', ') || '无'}`)
+      lines.push(`inventory changes: ${diff.join(', ') || 'none'}`)
     } else {
-      lines.push(`背包：${Object.entries(now).map(([n, c]) => `${n} ${c}`).join(', ') || '空'}`)
+      lines.push(`inventory: ${Object.entries(now).map(([n, c]) => `${n} ${c}`).join(', ') || 'empty'}`)
     }
     lastInventory = now
     return lines.join('\n')
@@ -49,11 +49,11 @@ export function statusReport (bot) {
 }
 
 function timeLine (t) {
-  if (typeof t !== 'number') return '时间未知'
+  if (typeof t !== 'number') return 'time unknown'
   const minutes = ticks => Math.round(ticks / 20 / 60 * 10) / 10
-  if (t < NIGHT) return `白天（${t}），天黑还有约 ${minutes(NIGHT - t)} 分钟`
-  if (t < DAWN) return `夜里（${t}），天亮还有约 ${minutes(DAWN - t)} 分钟`
-  return `黎明（${t}），太阳出来了，亡灵在阳光下会烧起来`
+  if (t < NIGHT) return `day (${t}), night in about ${minutes(NIGHT - t)} min`
+  if (t < DAWN) return `night (${t}), dawn in about ${minutes(DAWN - t)} min`
+  return `dawn (${t}), the sun is up; undead burn in sunlight`
 }
 
 function countItems (bot) {

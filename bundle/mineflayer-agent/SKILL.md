@@ -31,32 +31,32 @@ Killing the `run` command only stops its output; the job goes on. `node game.mjs
 ## The task contract
 
 ```js
-import { goto } from "mineflayer-world-memory/game/experimental/goto.mjs";
+import { walkTo } from "mineflayer-world-memory/game/experimental/walk-to.mjs";
 
 export default async function task(bot, ctx) {
   const [x, y, z] = ctx.args.map(Number); // the words after the file name
   ctx.log("on my way");                   // a line in the run output and the result
-  await goto(bot, ctx, [x, y, z]);         // toolkit functions stop by themselves
+  await walkTo(bot, ctx, [x, y, z]);       // toolkit functions stop by themselves
   if (ctx.signal.aborted) return;          // the exit rule, after your own awaits
   return bot.entity.position.floored();    // the result
 }
 ```
 
 - `ctx.args`, `ctx.log`, `ctx.signal` are all a task needs. `tasks/example.mjs` is a complete one.
-- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
+- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`walkTo`, `craftAndCount`) needs no exit code at all.
 - The return value is the result; a thrown error is the failure, with its message.
 - A task that keeps going after the abort keeps the character: nothing else starts, and `wait` tells you main needs a restart.
 
 ## What ends a job without you asking
 
 - **Death.** The job ends; idle starts after respawn. The report has where you died and where you respawned.
-- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `defend` reflex; your head stuck in a block starts `escape`. The job ends with the reflex's result.
+- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `fightOrFlee` reflex; your head stuck in a block starts `digHeadFree`. The job ends with the reflex's result.
 
 Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
 ## Between jobs
 
-Idle keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
+Idle (`stayAlive` in main) keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
 
 ## Commands
 
@@ -97,8 +97,8 @@ Which reflexes, idle, reports and plugins it uses is plain code. After editing i
 
 Optional. By default a preempt or a failed check ends the job and you decide what next. A task can instead offer safepoints where a reflex may preempt it and the task then runs again:
 
-- `await ctx.safepoint({ eat: "restart", defend: "end" })` checks those reflexes at that point. If one is needed, the task leaves and the reflex runs. `restart`: afterwards a new attempt runs the task **from the top** with `ctx.attempt` one higher, and the `run` command keeps following the job. `end`: the job ends and idle takes over.
-- `goto(bot, ctx, xyz, { checks: { eat: "restart" } })` offers that safepoint every half second.
+- `await ctx.safepoint({ eatWhenHungry: "restart", fightOrFlee: "end" })` checks those reflexes at that point. If one is needed, the task leaves and the reflex runs. `restart`: afterwards a new attempt runs the task **from the top** with `ctx.attempt` one higher, and the `run` command keeps following the job. `end`: the job ends and idle takes over.
+- `walkTo(bot, ctx, xyz, { checks: { eatWhenHungry: "restart" } })` offers that safepoint every half second.
 - Write a restartable task so a fresh attempt continues from where the character is: read the inventory and position first, skip what is already done.
 - Other `ctx` members: `ctx.cleanup(fn)` runs `fn` when the task leaves (for listeners and timers you add); `ctx.wake(reason)` makes `wait` return without ending the job; `ctx.preempt(name, { then, reason })` hands the character to a reflex yourself.
 
@@ -106,7 +106,7 @@ Optional. By default a preempt or a failed check ends the job and you decide wha
 
 - Plugins main loads (`game/lib/plugins.mjs`): `mineflayer-pathfinder`, `mineflayer-pvp` (`bot.pvp`), `mineflayer-auto-eat` (`bot.autoEat`, automatic eating off), `mineflayer-armor-manager`, `mineflayer-tool` (`bot.tool`), `mineflayer-collectblock` (`bot.collectBlock`). Use them in tasks instead of writing your own fighting, eating or collecting. Pathfinder walks without digging by default; a task that needs digging sets its own movements, and they go back to walking-only when it leaves.
 - `<toolkit>/game/index.mjs`: what main is built from (host, reports, damage types, chat, plugins, the crafting fix, `oxygenOf(bot)`).
-- `<toolkit>/game/experimental/`: control logic that is still on trial: `goto` (travel), `craftChecked` (craft and check the count), the reflexes `defend`, `escape`, `eat`, idle and the danger observer that preempts with them. Use it, copy it, change it; its README says what has been checked on a server.
+- `<toolkit>/game/experimental/`: control logic that is still on trial: `walkTo` (travel), `craftAndCount` (craft and check that the requested count arrived), the reflexes `fightOrFlee`, `digHeadFree`, `eatWhenHungry`, the idle loop `stayAlive` and the observer `preemptWhenHurt` that preempts with them. Use it, copy it, change it; its README says what has been checked on a server.
 
 ## More ways to look
 

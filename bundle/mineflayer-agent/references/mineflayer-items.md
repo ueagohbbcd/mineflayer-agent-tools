@@ -20,5 +20,5 @@ If you look in one program and take in the next, check that `bot.currentWindow` 
 
 ## Examples
 
-- [craft.mjs](../../../game/experimental/craft.mjs): `craftChecked`, crafting by name and checking the count rose.
+- [craft-and-count.mjs](../../../game/experimental/craft-and-count.mjs): `craftAndCount`, crafting by name; it fails with "wanted N, got M" unless the requested count arrived.
 - [inspect-placement-entities.mjs](../../../examples/inspect-placement-entities.mjs): checking that no entity blocks a placement (read-only).

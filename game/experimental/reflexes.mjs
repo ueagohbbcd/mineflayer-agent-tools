@@ -12,7 +12,7 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
 })
 
 // Does: the nearest hostile entity within `range` passing `filter`, as { e, d }, or null.
-// Checked: not checked on a server on its own; defend, idle and fleePoint use it.
+// Checked: not checked on a server on its own; fightOrFlee, stayAlive and fleePoint use it.
 // Limits: hostility is radar-report.mjs's isHostile list.
 export function nearestHostile (bot, range = 16, filter = () => true) {
   const me = bot.entity?.position
@@ -29,12 +29,12 @@ export function nearestHostile (bot, range = 16, filter = () => true) {
 // from it whatever its health (meleeing one cost 18 health, 3/3 runs).
 export const CREEPER_RANGE = 7
 // Does: true for a creeper entity.
-// Checked: with defend, creeper 3/3 without damage (2026-11-10).
-// Limits: see defend.
+// Checked: with fightOrFlee, creeper 3/3 without damage (2026-11-10).
+// Limits: see fightOrFlee.
 export const isCreeper = e => e.name === 'creeper'
 // Flee below FLEE_BELOW health; once fleeing, fight again only above
-// FIGHT_ABOVE (or when cornered). Kept per bot across defend runs, so idle
-// starting defend again does not turn a fleeing character back too early.
+// FIGHT_ABOVE (or when cornered). Kept per bot across fightOrFlee runs, so
+// stayAlive starting it again does not turn a fleeing character back too early.
 const FLEE_BELOW = 8
 const FIGHT_ABOVE = 14
 const fleeing = new WeakMap()
@@ -45,10 +45,10 @@ const fleeing = new WeakMap()
 //   in 9 runs (3 setups); creeper 3/3 without damage; job preempt 3 runs.
 // Limits: without regeneration (food below 18) it flees on: 150 s stand-offs,
 //   81–87 blocks away; open ground not checked; a creeper is never ended.
-export const defend = {
+export const fightOrFlee = {
   check: bot => {
     const h = nearestHostile(bot, 6)
-    return h && bot.health < 14 ? `${h.e.name} 在 ${Math.round(h.d)} 格，血 ${Math.round(bot.health)}` : null
+    return h && bot.health < 14 ? `${h.e.name} ${Math.round(h.d)} blocks away, health ${Math.round(bot.health)}` : null
   },
   async run (bot, { signal }) {
     const started = Date.now()
@@ -60,7 +60,7 @@ export const defend = {
         const h = nearestHostile(bot, 12)
         if (!h) {
           if (target) { bot.pvp.forceStop(); target = null }
-          if (++calm >= 6) { fleeing.delete(bot); return '周围安全' }
+          if (++calm >= 6) { fleeing.delete(bot); return 'nothing hostile nearby' }
           await sleep(500, signal)
           continue
         }
@@ -83,7 +83,7 @@ export const defend = {
         } else if (target) { bot.pvp.forceStop(); target = null } // only a creeper, farther than CREEPER_RANGE
         await sleep(500, signal)
       }
-      return `30 秒后仍有 ${nearestHostile(bot, 12)?.e.name ?? '威胁'}，交回`
+      return `${nearestHostile(bot, 12)?.e.name ?? 'a threat'} still near after 30 s, giving control back`
     } finally {
       bot.pvp.forceStop()
     }
@@ -93,7 +93,7 @@ export const defend = {
 // Does: where to run: of 16 directions, skipping those towards a hostile within
 //   6 blocks, the walkable stretch (up to 10 blocks) whose end is farthest from
 //   the nearest hostile; null when no end is more than 3 blocks away (cornered).
-// Checked: through defend, 2026-11-10 (see defend).
+// Checked: through fightOrFlee, 2026-11-10 (see fightOrFlee).
 // Limits: checked only in the walled arena; open ground not checked.
 export function fleePoint (bot) {
   const me = bot.entity.position.floored()
@@ -139,7 +139,7 @@ function standable (bot, x, y, z) {
 const WEAPONS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'netherite_axe', 'diamond_axe', 'iron_axe', 'stone_sword', 'stone_axe', 'golden_sword', 'wooden_sword', 'wooden_axe']
 
 // Does: equips the best sword or axe in the inventory (list WEAPONS); no-op if held.
-// Checked: 2026-11-09: defend switched to an iron sword (1 run).
+// Checked: 2026-11-09: fightOrFlee switched to an iron sword (1 run).
 // Limits: ignores enchantments and durability.
 export async function equipWeapon (bot) {
   const have = bot.inventory.items()
@@ -155,8 +155,8 @@ export async function equipWeapon (bot) {
 // Checked: dirt at head height dug out: 2026-11-08, 2026-11-09 (iron shovel),
 //   2026-11-10 (1 run each).
 // Limits: the step-back branch (a block it cannot dig) is not checked on a server.
-export const escape = {
-  check: bot => (headBlocked(bot) ? `头部在 ${bot.blockAt(bot.entity.position.offset(0, 1.6, 0)).name} 里` : null),
+export const digHeadFree = {
+  check: bot => (headBlocked(bot) ? `head inside ${bot.blockAt(bot.entity.position.offset(0, 1.6, 0)).name}` : null),
   async run (bot, { signal }) {
     signal.throwIfAborted()
     for (let i = 0; i < 5 && headBlocked(bot); i++) {
@@ -172,13 +172,13 @@ export const escape = {
         bot.setControlState('back', false)
       }
     }
-    return headBlocked(bot) ? '还在方块里' : '头部已经空出'
+    return headBlocked(bot) ? 'head still inside a block' : 'head free'
   }
 }
 
 // Does: true when the block at eye height has a full collision box.
-// Checked: through escape and dangerPreempt's in_wall runs (see escape).
-// Limits: see escape.
+// Checked: through digHeadFree and preemptWhenHurt's in_wall runs (see digHeadFree).
+// Limits: see digHeadFree.
 export function headBlocked (bot) {
   const head = bot.entity && bot.blockAt(bot.entity.position.offset(0, 1.6, 0))
   return Boolean(head && head.boundingBox === 'block')
@@ -187,7 +187,7 @@ export function headBlocked (bot) {
 // Does: something worth eating, by mineflayer-auto-eat's food list and its
 //   banned foods, or null when auto-eat is not loaded.
 // Checked: 2026-11-09: auto-eat chose bread over rotten flesh (1 run).
-// Limits: see eat.
+// Limits: see eatWhenHungry.
 export function foodItem (bot) {
   const ae = bot.autoEat
   if (!ae) return null
@@ -197,11 +197,11 @@ export function foodItem (bot) {
 // Does: eats until food is 18 or there is nothing to eat; `check` fires at food
 //   14 or lower. mineflayer-auto-eat picks the food and puts the held item back.
 // Checked: safepoint restart after eating 2 breads (2026-11-08, 2026-11-10,
-//   1 run each); idle eating at night (2026-11-10, 1 run).
+//   1 run each); stayAlive eating at night (2026-11-10, 1 run).
 // Limits: food lagging after eating was reported in play, not reproduced;
 //   it waits up to 2 s for food to change.
-export const eat = {
-  check: bot => (bot.food <= 14 && foodItem(bot) ? `饥饿 ${bot.food}` : null),
+export const eatWhenHungry = {
+  check: bot => (bot.food <= 14 && foodItem(bot) ? `food ${bot.food}` : null),
   async run (bot, { signal }) {
     signal.throwIfAborted()
     const out = []
@@ -213,6 +213,6 @@ export const eat = {
       for (let i = 0; i < 20 && bot.food === before; i++) await sleep(100, signal)
       out.push(`${before} → ${bot.food}`)
     }
-    return out.length ? `饥饿 ${out.join('，')}` : '没吃'
+    return out.length ? `ate, food ${out.join(', ')}` : 'nothing eaten'
   }
 }

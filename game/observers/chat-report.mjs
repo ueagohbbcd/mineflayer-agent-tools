@@ -7,12 +7,12 @@ export function watchChat (bot, { wake } = {}) {
     if (username === bot.username) return
     lines.push(`<${username}> ${message}`)
     if (lines.length > 50) lines.shift()
-    if (new RegExp(`\\b${escape(bot.username)}\\b`, 'i').test(message)) wake?.(`${username} 提到你：${message}`)
+    if (new RegExp(`\\b${escape(bot.username)}\\b`, 'i').test(message)) wake?.(`${username} mentioned you: ${message}`)
   })
   bot.on('whisper', (username, message) => {
     if (username === bot.username) return
-    lines.push(`<${username} 私聊> ${message}`)
-    wake?.(`${username} 私聊：${message}`)
+    lines.push(`<${username} whispers> ${message}`)
+    wake?.(`${username} whispers: ${message}`)
   })
   return {
     report () {

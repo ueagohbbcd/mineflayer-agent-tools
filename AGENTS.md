@@ -6,7 +6,7 @@ For contributors to this repository. Agents that play through it read `game/temp
 
 - **Libraries** (repository root, `lib/`, `renderers/`): passive helpers on a bot or its world: optional history of received chunks, bounded queries, pictures, the watchdog. They never import `game/`, never notify a model, and take a callback for anything they report.
 - **Game** (`game/`): one process that holds the bot (`template/main.mjs`). The core (`lib/host.mjs`, `lib/server.mjs`) is kept small and game-agnostic: run task files as jobs, hand control between task, reflex and idle through one exit flow, a Unix socket for run/cancel/wait/query/status (binding it is what keeps one main per project), a wake flag, report functions joined when `wait` returns, and one event outlet (`onEvent`) through which the journal observer writes the game's timeline. A task that does not exit keeps the bot; the fallback is restarting the process, never wrapping the bot. Plugin quirks live in `game/lib/plugins.mjs`. The player's page is `game/template/AGENTS.md`; it is the one source of the task contract, and `npm run build:bundle` copies it into `skills/mineflayer-game/SKILL.md`. Telling a model when a background command ends is left to the harness.
-- **Experimental** (`game/experimental/`): control logic found useful in tests or play (reflexes, idle, the danger observer that preempts, `goto`, `craftChecked`). It stays there, marked in its README with what was checked on a server, until it has earned a place as a routine. Lessons for playing go into skills more freely.
+- **Experimental** (`game/experimental/`): control logic found useful in tests or play (the reflexes, the idle loop `stayAlive`, the observer `preemptWhenHurt`, `walkTo`, `craftAndCount`). Its names say what each thing does and no more, since a one-word name reads as the official way. It stays there, marked in its README with what was checked on a server, until it has earned a place as a routine. Lessons for playing go into skills more freely.
 
 Example programs (`examples/*.mjs`) sit on top of both: short task/query modules that each show one way to do a task, for agents to read, run or copy. They are teaching material, so keep each one to one technique. One way per thing: a second way enters only with server evidence that it is better for some case. Their tests are in `test/examples/`.
 
@@ -17,7 +17,7 @@ Scope and what not to build: [docs/project-scope.md](docs/project-scope.md).
 The game's terms come from OS job control; code, docs and messages use only these ([game/README.md](game/README.md) has the full table):
 
 - **job** (作业): what the model submits with `run` and follows to its end across restarts, like a shell job; one run of its task file is an **attempt**.
-- **reflex** (反射): a short emergency behaviour that takes the bot (`defend`, `escape`, `eat`), like an interrupt handler.
+- **reflex** (反射): a short emergency behaviour that takes the bot (`fightOrFlee`, `digHeadFree`, `eatWhenHungry`), like an interrupt handler.
 - **preempt** (抢占): a reflex taking the bot from the running controller, like a scheduler preempting a process; `then: 'restart' | 'end'` says what follows.
 - **safepoint** (安全点): a point where a task offers to be preempted, like a runtime safepoint.
 - **observer** (观察器), **report** (报告函数), **experimental** (试验): the parts wired in `main.mjs` that listen and record, the functions `wait` joins, and control logic still on trial, like a kernel's staging area.
@@ -52,13 +52,15 @@ Where a new piece of knowledge goes:
 
 Writing rules: state what is decided, in the present tense; write only about what the reader can see in the repository; say "not verified" or "not reproduced" where that is the case.
 
+Language: everything a playing model reads (the player page, skills, examples, runtime output) is English; design and developer documents under `docs/` and the game READMEs are Chinese; code comments are English.
+
 ## Comments
 
 - A source file starts with a header of one to five lines: what the file is for and who calls it.
 - An exported function states its contract (inputs, result, when it throws) when the name does not.
 - Experimental code (`game/experimental/`) carries `Does:` / `Checked:` / `Limits:` above each export, taken from the record tables in its README and from `docs/lessons.md`.
 - A workaround names the observed behaviour it answers.
-- Comments are in English; text shown to the playing model is in Chinese.
+- Comments are in English.
 - Comments describe the code as it is, without its history.
 
 ## Who consumes it

@@ -6,25 +6,25 @@ export const text = value => (typeof value === 'string' ? value : JSON.stringify
 export const errorText = error => error?.message ?? String(error)
 
 export function describeController (ctrl) {
-  if (!ctrl) return '无'
-  return { task: `任务 ${ctrl.name}`, reflex: `反射 ${ctrl.name}`, idle: 'idle' }[ctrl.kind] ?? ctrl.name
+  if (!ctrl) return 'none'
+  return { task: `task ${ctrl.name}`, reflex: `reflex ${ctrl.name}`, idle: 'idle' }[ctrl.kind] ?? ctrl.name
 }
 
 export function describeNow ({ alive, job, controller }) {
-  if (!alive) return '角色已死亡，等待重生'
-  const doing = job?.status === 'running' ? `作业 ${job.id} 进行中（第 ${job.attempts} 次尝试）` : '没有作业在进行'
-  const stuck = controller?.phase === 'stuck' ? '（不肯退出，需要重启进程）' : ''
-  return `${doing}；控制者：${describeController(controller)}${stuck}`
+  if (!alive) return 'the character is dead, waiting to respawn'
+  const doing = job?.status === 'running' ? `job ${job.id} running (attempt ${job.attempts})` : 'no job running'
+  const stuck = controller?.phase === 'stuck' ? ' (will not exit; main needs a restart)' : ''
+  return `${doing}; controller: ${describeController(controller)}${stuck}`
 }
 
 export function endWord (j) {
   const r = j.result ?? {}
-  if (r.ok) return '完成'
-  if (r.ended === 'death') return `因死亡结束（${r.where}）`
-  if (r.ended === 'cancelled') return r.reason && r.reason !== '已取消' ? `已取消（${r.reason}）` : '已取消'
-  if (r.ended === 'replaced') return '被新作业替换'
-  if (r.preemptedBy) return `被 ${r.preemptedBy} 抢占后结束（${r.reason}）`
-  return `失败：${r.error}`
+  if (r.ok) return 'done'
+  if (r.ended === 'death') return `ended by death at ${r.where}`
+  if (r.ended === 'cancelled') return r.reason && r.reason !== 'cancelled' ? `cancelled (${r.reason})` : 'cancelled'
+  if (r.ended === 'replaced') return 'replaced by a new job'
+  if (r.preemptedBy) return `ended after ${r.preemptedBy} preempted it (${r.reason})`
+  return `failed: ${r.error}`
 }
 
 export function summarizeJob (j) {
@@ -43,11 +43,11 @@ export function summarizeJob (j) {
 }
 
 export function formatSummary (s) {
-  const lines = [`${s.id} ${s.end ?? '进行中'}（${s.seconds} 秒，尝试 ${s.attempts} 次）`]
-  if (s.ok && s.value !== undefined) lines.push(`结果：${text(s.value)}`)
-  if (s.reflex) lines.push(`抢占的反射：${s.reflex}`)
-  if (s.position) lines.push(`位置：${s.position.join(' ')}`)
-  if (s.log) lines.push(`任务输出（最后 ${s.log.length} 行）：`, ...s.log.map(l => `  ${l}`))
+  const lines = [`${s.id} ${s.end ?? 'running'} (${s.seconds} s, ${s.attempts} ${s.attempts === 1 ? 'attempt' : 'attempts'})`]
+  if (s.ok && s.value !== undefined) lines.push(`result: ${text(s.value)}`)
+  if (s.reflex) lines.push(`reflex ${s.preemptedBy} ${s.reflex}`)
+  if (s.position) lines.push(`position: ${s.position.join(' ')}`)
+  if (s.log) lines.push(`task output (last ${s.log.length} ${s.log.length === 1 ? 'line' : 'lines'}):`, ...s.log.map(l => `  ${l}`))
   return lines.join('\n')
 }
 

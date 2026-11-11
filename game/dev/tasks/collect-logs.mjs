@@ -13,8 +13,8 @@ export default async function task (bot, ctx) {
   bot.collectBlock.movements = digging
   const blocks = bot.findBlocks({ matching: bot.registry.blocksByName[name].id, maxDistance: 32, count })
     .map(p => bot.blockAt(p))
-  ctx.log(`找到 ${blocks.length} 个 ${name}`)
-  if (!blocks.length) throw new Error(`32 格内没有 ${name}`)
+  ctx.log(`found ${blocks.length} ${name}`)
+  if (!blocks.length) throw new Error(`no ${name} within 32 blocks`)
   await bot.collectBlock.collect(blocks)
   if (ctx.signal.aborted) return
   const have = bot.inventory.items().filter(i => i.name === name).reduce((n, i) => n + i.count, 0)

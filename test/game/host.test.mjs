@@ -55,7 +55,7 @@ test('a task that finishes ends the job, wakes, and wait returns at once', async
   assert.equal(r.result().value, 42)
   assert.equal(host.pending(), true)
   const report = await host.waitForReport()
-  assert.match(report, /最近结束的作业：j1-ok 完成/)
+  assert.match(report, /Last job: j1-ok done/)
   assert.equal(host.pending(), false)
 })
 
@@ -110,7 +110,7 @@ test('report functions: a failing one is reported and the others still run', asy
   host.addReport('good', () => 'fine')
   host.wake('x')
   const report = await host.waitForReport()
-  assert.match(report, /== bad ==\n报告出错：boom/)
+  assert.match(report, /== bad ==\nreport failed: boom/)
   assert.match(report, /== good ==\nfine/)
 })
 
@@ -118,43 +118,43 @@ test('safepoint with then restart: task exits, reflex runs, a new attempt starts
   const order = []
   let hungry = true
   const reflexes = {
-    eat: {
+    eatWhenHungry: {
       check: () => (hungry ? 'food 6' : null),
-      run: async () => { order.push('eat'); hungry = false; return 'ate' }
+      run: async () => { order.push('eatWhenHungry'); hungry = false; return 'ate' }
     }
   }
   const { host, file, run } = setup({ reflexes })
   globalThis.__order = order
   const r = await run(file('trip', `export default async (bot, ctx) => {
     globalThis.__order.push('start ' + ctx.attempt)
-    try { await ctx.safepoint({ eat: 'restart' }) } finally { globalThis.__order.push('finally ' + ctx.attempt) }
+    try { await ctx.safepoint({ eatWhenHungry: 'restart' }) } finally { globalThis.__order.push('finally ' + ctx.attempt) }
     return 'done'
   }`))
   await until(() => r.result())
-  assert.deepEqual(order, ['start 1', 'finally 1', 'eat', 'start 2', 'finally 2'])
+  assert.deepEqual(order, ['start 1', 'finally 1', 'eatWhenHungry', 'start 2', 'finally 2'])
   assert.equal(r.result().ok, true)
   assert.equal(r.result().attempts, 2)
   assert.equal(r.msgs.filter(m => m.type === 'result').length, 1)
-  assert.ok(r.msgs.some(m => m.type === 'event' && /重跑/.test(m.text)))
+  assert.ok(r.msgs.some(m => m.type === 'event' && /\[restart\]/.test(m.text)))
   assert.equal(host.job.status, 'ended')
 })
 
 test('preempt from an observer, then end: the job ends after the reflex, then idle', async () => {
   const order = []
-  const reflexes = { defend: { run: async () => { order.push('defend'); await sleep(30); return 'safe' } } }
+  const reflexes = { fightOrFlee: { run: async () => { order.push('fightOrFlee'); await sleep(30); return 'safe' } } }
   const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
   const { host, file, run } = setup({ reflexes, idle })
   const r = await run(file('mine', `export default async (bot, ctx) => {
     await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
   }`))
   await sleep(20)
-  assert.equal(host.preempt('defend', { reason: 'skeleton' }).ok, true)
+  assert.equal(host.preempt('fightOrFlee', { reason: 'skeleton' }).ok, true)
   assert.equal(r.result(), undefined, 'submit still follows while the reflex runs')
   await until(() => r.result())
-  assert.equal(r.result().preemptedBy, 'defend')
+  assert.equal(r.result().preemptedBy, 'fightOrFlee')
   assert.match(r.result().reflex, /safe/)
   await until(() => host.controller?.kind === 'idle')
-  assert.deepEqual(order, ['defend', 'idle'])
+  assert.deepEqual(order, ['fightOrFlee', 'idle'])
 })
 
 test('a second preempt while one is running is refused', async () => {
@@ -186,28 +186,28 @@ test('the exit flow runs once even when requested twice', async () => {
 
 test('a task that ignores the exit keeps control: nothing else starts, the model is woken, then things proceed', async () => {
   const order = []
-  const reflexes = { defend: { run: async () => { order.push('defend'); return 'ran' } } }
+  const reflexes = { fightOrFlee: { run: async () => { order.push('fightOrFlee'); return 'ran' } } }
   const { host, file, run } = setup({ reflexes })
   const r = await run(file('stubborn', `export default async (bot, ctx) => {
     ctx.log('digging the last block')
     await new Promise(r => setTimeout(r, 1500)); return "late"
   }`))
   await sleep(20)
-  const t = host.preempt('defend', { reason: 'x' })
+  const t = host.preempt('fightOrFlee', { reason: 'x' })
   assert.equal(await t.done, false)
   assert.equal(host.controller.kind, 'task')
   assert.equal(host.controller.phase, 'stuck')
-  assert.equal(host.preempt('defend').ok, false, 'no second request while stuck')
+  assert.equal(host.preempt('fightOrFlee').ok, false, 'no second request while stuck')
   const report = await host.waitForReport()
-  assert.match(report, /没有退出，仍占着角色；它最后输出的一行：digging the last block/)
-  assert.match(report, /每次 await 之后检查 ctx\.signal\.aborted，为真就返回/)
+  assert.match(report, /has not exited .* and still holds the character; its last log line: digging the last block/)
+  assert.match(report, /after every await, check ctx\.signal\.aborted and return if it is true/)
   assert.deepEqual(order, [])
   assert.equal(r.result(), undefined)
   // When it finally returns, the queued reflex runs as usual and the model hears of it.
   await until(() => r.result(), 3000)
-  assert.deepEqual(order, ['defend'])
-  assert.equal(r.result().preemptedBy, 'defend')
-  assert.match(await host.waitForReport(), /终于退出了/)
+  assert.deepEqual(order, ['fightOrFlee'])
+  assert.equal(r.result().preemptedBy, 'fightOrFlee')
+  assert.match(await host.waitForReport(), /has exited at last/)
 })
 
 test('a cancel while stuck ends the job as cancelled once the task finally exits', async () => {
@@ -222,7 +222,7 @@ test('a cancel while stuck ends the job as cancelled once the task finally exits
 
 test('preempt then cancel before the task has exited: the reflex never starts, idle follows', async () => {
   const order = []
-  const reflexes = { defend: { run: async () => { order.push('defend'); await sleep(200); return 'safe' } } }
+  const reflexes = { fightOrFlee: { run: async () => { order.push('fightOrFlee'); await sleep(200); return 'safe' } } }
   const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
   const { host, file, run } = setup({ reflexes, idle })
   await until(() => host.controller?.kind === 'idle')
@@ -232,7 +232,7 @@ test('preempt then cancel before the task has exited: the reflex never starts, i
     await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
   }`))
   await sleep(20)
-  assert.equal(host.preempt('defend', { reason: 'zombie' }).ok, true)
+  assert.equal(host.preempt('fightOrFlee', { reason: 'zombie' }).ok, true)
   const c = await host.cancel()
   assert.equal(c.ok, true)
   assert.equal(r.result().ended, 'cancelled')
@@ -245,7 +245,7 @@ test('preempt then cancel before the task has exited: the reflex never starts, i
 test('cancel while a reflex holds the job ends the reflex and the job, then idle', async () => {
   const order = []
   const reflexes = {
-    defend: { run: async (bot, ctx) => { order.push('defend'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)); order.push('defend left') } }
+    fightOrFlee: { run: async (bot, ctx) => { order.push('fightOrFlee'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)); order.push('fightOrFlee left') } }
   }
   const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
   const { host, file, run } = setup({ reflexes, idle })
@@ -255,24 +255,24 @@ test('cancel while a reflex holds the job ends the reflex and the job, then idle
     await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
   }`))
   await sleep(20)
-  host.preempt('defend', { reason: 'zombie' })
+  host.preempt('fightOrFlee', { reason: 'zombie' })
   await until(() => host.controller?.kind === 'reflex')
   const c = await host.cancel()
   assert.equal(c.ok, true)
   assert.equal(r.result().ended, 'cancelled')
   await until(() => host.controller?.kind === 'idle')
-  assert.deepEqual(order, ['defend', 'defend left', 'idle'])
+  assert.deepEqual(order, ['fightOrFlee', 'fightOrFlee left', 'idle'])
 })
 
 test('submitting a new job while a preempt is queued replaces it; the reflex never starts', async () => {
   const order = []
-  const reflexes = { defend: { run: async () => { order.push('defend') } } }
+  const reflexes = { fightOrFlee: { run: async () => { order.push('fightOrFlee') } } }
   const { host, file, run } = setup({ reflexes })
   const a = await run(file('a2', `export default async (bot, ctx) => {
     await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
   }`))
   await sleep(20)
-  host.preempt('defend')
+  host.preempt('fightOrFlee')
   const b = await run(file('b2', 'export default async () => "b"'))
   assert.equal(b.out.ok, true)
   await until(() => b.result())
@@ -282,7 +282,7 @@ test('submitting a new job while a preempt is queued replaces it; the reflex nev
 
 test('death while a preempt is queued: the reflex never starts, no idle before respawn', async () => {
   const order = []
-  const reflexes = { defend: { run: async () => { order.push('defend') } } }
+  const reflexes = { fightOrFlee: { run: async () => { order.push('fightOrFlee') } } }
   const idle = async (bot, ctx) => { order.push('idle'); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve)) }
   const { host, bot, file, run } = setup({ reflexes, idle })
   await until(() => host.controller?.kind === 'idle')
@@ -291,7 +291,7 @@ test('death while a preempt is queued: the reflex never starts, no idle before r
     await new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(resolve, 50)))
   }`))
   await sleep(20)
-  host.preempt('defend')
+  host.preempt('fightOrFlee')
   bot.health = 0
   bot.emit('death')
   await until(() => r.result())
@@ -330,7 +330,7 @@ test('submitting a new job replaces the running one through the exit flow', asyn
 
 test('death ends the job, cancels a pending restart, and a late reflex end restarts nothing', async () => {
   const reflexes = {
-    eat: {
+    eatWhenHungry: {
       check: () => 'hungry',
       // Finishes a moment after its exit is requested: a late completion.
       run: (bot, ctx) => new Promise(resolve => ctx.signal.addEventListener('abort', () => setTimeout(() => resolve('ate late'), 50)))
@@ -341,7 +341,7 @@ test('death ends the job, cancels a pending restart, and a late reflex end resta
   globalThis.__starts = 0
   const r = await run(file('d', `export default async (bot, ctx) => {
     globalThis.__starts++
-    await ctx.safepoint({ eat: 'restart' })
+    await ctx.safepoint({ eatWhenHungry: 'restart' })
   }`))
   await until(() => host.controller?.kind === 'reflex')
   bot.health = 0
@@ -354,7 +354,7 @@ test('death ends the job, cancels a pending restart, and a late reflex end resta
   bot.health = 20
   bot.emit('spawn')
   await until(() => host.controller?.kind === 'idle')
-  assert.match(await host.waitForReport(), /重生/)
+  assert.match(await host.waitForReport(), /respawned/)
 })
 
 test('a task that throws ends the job with the error and returns to idle', async () => {
@@ -393,13 +393,13 @@ test('onEvent: a finished job, then a wait', async () => {
   assert.deepEqual(got[0].args, [])
   assert.equal(got[2].attempt, 1)
   assert.equal(got[4].ok, true)
-  assert.equal(got[4].end, '完成')
-  assert.match(got[7].text, /j1-ok 完成/)
+  assert.equal(got[4].end, 'done')
+  assert.match(got[7].text, /j1-ok done/)
   assert.equal(got[7].waiters, 1)
 })
 
 test('onEvent: a preempt with then end', async () => {
-  const reflexes = { defend: { run: async () => { await sleep(20); return 'safe' } } }
+  const reflexes = { fightOrFlee: { run: async () => { await sleep(20); return 'safe' } } }
   const { host, file, run, got, seen } = withEvents({ reflexes })
   await until(() => host.controller?.kind === 'idle')
   got.length = 0
@@ -407,13 +407,13 @@ test('onEvent: a preempt with then end', async () => {
     await new Promise((resolve, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason)))
   }`))
   await sleep(20)
-  host.preempt('defend', { reason: 'zombie' })
+  host.preempt('fightOrFlee', { reason: 'zombie' })
   await until(() => host.controller?.kind === 'idle' && r.result())
   assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'preempt', 'wake', 'settle:task', 'control:reflex', 'settle:reflex', 'job_end', 'wake', 'control:idle'])
   const p = got[3]
-  assert.deepEqual([p.reflex, p.then, p.reason, p.by, p.job], ['defend', 'end', 'zombie', 'observer', 'j1-mine'])
+  assert.deepEqual([p.reflex, p.then, p.reason, p.by, p.job], ['fightOrFlee', 'end', 'zombie', 'observer', 'j1-mine'])
   assert.match(got[7].outcome, /safe/)
-  assert.equal(got[8].preemptedBy, 'defend')
+  assert.equal(got[8].preemptedBy, 'fightOrFlee')
 })
 
 test('onEvent: cancel', async () => {
@@ -427,7 +427,7 @@ test('onEvent: cancel', async () => {
   await host.cancel()
   await until(() => host.controller?.kind === 'idle' && r.result())
   assert.deepEqual(seen(), ['job', 'settle:idle', 'control:task', 'settle:task', 'job_end', 'wake', 'control:idle'])
-  assert.match(got[3].outcome, /已取消/)
+  assert.match(got[3].outcome, /cancelled/)
   assert.equal(got[4].ended, 'cancelled')
 })
 

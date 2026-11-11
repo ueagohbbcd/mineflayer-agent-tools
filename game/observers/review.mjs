@@ -10,15 +10,15 @@ import { journalText } from './journal.mjs'
 
 const LEAD_MS = 60000
 const LONG_JOB_S = 180
-const CATEGORIES = ['完成', '失败', '取消', '被替换', '被抢占', '死亡', 'main 退出']
+const CATEGORIES = ['done', 'failed', 'cancelled', 'replaced', 'preempted', 'died', 'main exited']
 
 export function category (s) {
-  if (s.ok) return '完成'
-  if (s.ended === 'death') return '死亡'
-  if (s.ended === 'cancelled') return '取消'
-  if (s.ended === 'replaced') return '被替换'
-  if (s.preemptedBy) return '被抢占'
-  return '失败'
+  if (s.ok) return 'done'
+  if (s.ended === 'death') return 'died'
+  if (s.ended === 'cancelled') return 'cancelled'
+  if (s.ended === 'replaced') return 'replaced'
+  if (s.preemptedBy) return 'preempted'
+  return 'failed'
 }
 
 export function review (entries) {
@@ -56,7 +56,7 @@ export function review (entries) {
   const closeRun = at => {
     if (ctrl) r.control[ctrl.kind] += at - ctrl.since
     ctrl = null
-    if (current && !current.end) { current.end = { category: 'main 退出' }; current.endedAt = at }
+    if (current && !current.end) { current.end = { category: 'main exited' }; current.endedAt = at }
     current = null
   }
 
@@ -158,13 +158,13 @@ export function review (entries) {
 
   r.jobs.total = jobs.length
   for (const j of jobs) {
-    const end = j.end ?? { category: '进行中' }
+    const end = j.end ?? { category: 'running' }
     if (end.category in r.jobs.byEnd) r.jobs.byEnd[end.category]++
     const brief = { id: j.id, at: j.at, file: path.basename(j.file ?? ''), end: end.word ?? end.category, error: end.error ?? null }
     if (!seenFiles.has(j.file)) {
       seenFiles.add(j.file)
-      if (end.category === '失败') r.jobs.firstRunFailed.push(brief)
-      if (!r.jobs.firstOwn && path.basename(j.file ?? '') !== 'example.mjs') r.jobs.firstOwn = { ...brief, ok: end.category === '完成' }
+      if (end.category === 'failed') r.jobs.firstRunFailed.push(brief)
+      if (!r.jobs.firstOwn && path.basename(j.file ?? '') !== 'example.mjs') r.jobs.firstOwn = { ...brief, ok: end.category === 'done' }
     }
     const seconds = end.seconds ?? (j.endedAt ? s(j.endedAt - j.submittedAt) : null)
     if (seconds > LONG_JOB_S) r.jobs.long.push({ ...brief, seconds })
@@ -204,51 +204,52 @@ function leadLines (entries) {
   return lines
 }
 
-const hitLine = h => `${clock(h.at)} 受伤 ${h.cause}${h.source ? `（${h.source}）` : ''}${h.count > 1 ? `×${h.count}，血 ${h.from}→${h.to}` : `，血 ${h.to}`}`
+const hitLine = h => `${clock(h.at)} hurt ${h.cause}${h.source ? ` (${h.source})` : ''}${h.count > 1 ? `×${h.count}, health ${h.from}→${h.to}` : `, health ${h.to}`}`
 
 const pct = (n, total) => (total ? `${Math.round(n / total * 100)}%` : '-')
 const MAX_LEAD = 8
 
 export function formatReview (r) {
-  if (!r.from) return '日志里没有记录（records/journal.jsonl）。main 接上 journal 观察器后才开始写。'
+  if (!r.from) return 'The journal has no entries (records/journal.jsonl). It is written once main runs with the journal observer.'
   const out = []
-  out.push(`== 回顾 ${clock(r.from)}–${clock(r.to)}（${Math.round(r.seconds / 60)} 分钟，时间为 UTC）==`)
+  out.push(`== Review ${clock(r.from)}–${clock(r.to)} (${Math.round(r.seconds / 60)} min, times in UTC) ==`)
 
-  const crash = r.crashes.length ? `，崩溃 ${r.crashes.length} 次（${r.crashes.map(c => `${clock(c.lastAt)} 之后`).join('、')}没有停止记录）` : '，没有崩溃'
-  const exits = r.exits.length ? `，非 0 退出 ${r.exits.map(x => `${clock(x.at)}（${x.code}）`).join('、')}` : ''
-  out.push(`1. 概况：main 启动 ${r.starts} 次${crash}${exits}${r.running ? '，最后一次仍在运行或已崩溃' : ''}；死亡 ${r.deaths.length} 次`)
+  const times = n => `${n} ${n === 1 ? 'time' : 'times'}`
+  const crash = r.crashes.length ? `, crashed ${times(r.crashes.length)} (no stop recorded after ${r.crashes.map(c => clock(c.lastAt)).join(', ')})` : ', no crashes'
+  const exits = r.exits.length ? `, nonzero exits ${r.exits.map(x => `${clock(x.at)} (${x.code})`).join(', ')}` : ''
+  out.push(`1. Overview: main started ${times(r.starts)}${crash}${exits}${r.running ? ', the last start is still running or crashed' : ''}; died ${times(r.deaths.length)}`)
 
-  out.push(`2. 死亡：${r.deaths.length ? '' : '无'}`)
+  out.push(`2. Deaths:${r.deaths.length ? '' : ' none'}`)
   for (const d of r.deaths) {
-    const cause = d.cause ? `${d.cause.cause}${d.cause.source ? `（${d.cause.source}）` : ''}` : '死前 10 秒没有受伤记录'
-    out.push(`  ${clock(d.at)} @ ${d.where}，${cause}；作业 ${d.job ?? '无'}，控制者 ${d.controller ?? '无'}`)
-    const lead = d.lead.length > MAX_LEAD ? [`…之前还有 ${d.lead.length - MAX_LEAD} 行`, ...d.lead.slice(-MAX_LEAD)] : d.lead
+    const cause = d.cause ? `${d.cause.cause}${d.cause.source ? ` (${d.cause.source})` : ''}` : 'no damage recorded in the 10 s before'
+    out.push(`  ${clock(d.at)} at ${d.where}, ${cause}; job ${d.job ?? 'none'}, controller ${d.controller ?? 'none'}`)
+    const lead = d.lead.length > MAX_LEAD ? [`…${d.lead.length - MAX_LEAD} earlier lines`, ...d.lead.slice(-MAX_LEAD)] : d.lead
     for (const line of lead) out.push(`    ${line}`)
   }
 
   const j = r.jobs
-  const ends = Object.entries(j.byEnd).filter(([, n]) => n).map(([c, n]) => `${c} ${n}`).join('，')
-  out.push(`3. 作业：${j.total} 个${ends ? `（${ends}）` : ''}`)
-  out.push(`  第一个作业开始：${j.firstStartSeconds === null ? '没有' : `main 首次启动后 ${j.firstStartSeconds} 秒`}`)
-  out.push(`  第一个自写任务：${j.firstOwn ? `${j.firstOwn.id}（${j.firstOwn.file}）${j.firstOwn.ok ? '首次运行完成' : `首次运行${j.firstOwn.end}`}` : '没有'}`)
-  out.push(`  首次运行就失败：${j.firstRunFailed.length ? '' : '无'}`)
-  for (const f of j.firstRunFailed) out.push(`    ${clock(f.at)} ${f.id}：${f.error}`)
-  out.push(`  超过 3 分钟：${j.long.length ? j.long.map(x => `${x.id}（${Math.round(x.seconds)} 秒，${x.end}）`).join('，') : '无'}`)
-  out.push(`  卡住：${j.stuck.length ? j.stuck.map(x => `${clock(x.at)} ${x.name}（${x.why}）${x.exitedAt ? `，${clock(x.exitedAt)} 退出` : '，没有退出'}`).join('；') : '无'}`)
+  const ends = Object.entries(j.byEnd).filter(([, n]) => n).map(([c, n]) => `${c} ${n}`).join(', ')
+  out.push(`3. Jobs: ${j.total}${ends ? ` (${ends})` : ''}`)
+  out.push(`  first job started: ${j.firstStartSeconds === null ? 'none' : `${j.firstStartSeconds} s after main first started`}`)
+  out.push(`  first task of your own: ${j.firstOwn ? `${j.firstOwn.id} (${j.firstOwn.file}), ${j.firstOwn.ok ? 'done on its first run' : `first run ${j.firstOwn.end}`}` : 'none'}`)
+  out.push(`  failed on the first run:${j.firstRunFailed.length ? '' : ' none'}`)
+  for (const f of j.firstRunFailed) out.push(`    ${clock(f.at)} ${f.id}: ${f.error}`)
+  out.push(`  longer than 3 minutes: ${j.long.length ? j.long.map(x => `${x.id} (${Math.round(x.seconds)} s, ${x.end})`).join(', ') : 'none'}`)
+  out.push(`  stuck: ${j.stuck.length ? j.stuck.map(x => `${clock(x.at)} ${x.name} (${x.why})${x.exitedAt ? `, exited ${clock(x.exitedAt)}` : ', never exited'}`).join('; ') : 'none'}`)
 
   const c = r.control
-  out.push(`4. 控制者时间：任务 ${Math.round(c.task)} 秒（${pct(c.task, r.seconds)}），反射 ${Math.round(c.reflex)} 秒（${pct(c.reflex, r.seconds)}），idle ${Math.round(c.idle)} 秒（${pct(c.idle, r.seconds)}），无控制者 ${Math.round(c.none)} 秒（${pct(c.none, r.seconds)}，死亡、main 未运行、交接）`)
+  out.push(`4. Controller time: task ${Math.round(c.task)} s (${pct(c.task, r.seconds)}), reflex ${Math.round(c.reflex)} s (${pct(c.reflex, r.seconds)}), idle ${Math.round(c.idle)} s (${pct(c.idle, r.seconds)}), no controller ${Math.round(c.none)} s (${pct(c.none, r.seconds)}: dead, main not running, handovers)`)
 
-  out.push(`5. 反射：${r.preempts.length ? '' : '无抢占'}`)
+  out.push(`5. Reflexes:${r.preempts.length ? '' : ' no preempts'}`)
   for (const p of r.preempts) {
-    out.push(`  ${clock(p.at)} ${p.reflex}（${p.reason || '无原因'}，来自 ${p.by}）→ ${p.outcome ?? '没有启动'}；${p.job ? `作业 ${p.job} ${p.jobEnd ?? '未结束'}` : '无作业'}`)
+    out.push(`  ${clock(p.at)} ${p.reflex} (${p.reason || 'no reason given'}, from ${p.by}) → ${p.outcome ?? 'did not start'}; ${p.job ? `job ${p.job} ${p.jobEnd ?? 'not ended'}` : 'no job'}`)
   }
 
   const u = r.reports.longestUnread
-  out.push(`6. 报告：wait 收到报告 ${r.reports.delivered} 次；作业结束到下一次报告最长 ${u ? `${Math.round(u.seconds)} 秒（${u.job}${u.read ? '' : '，到记录末尾仍未读'}）` : '-'}`)
+  out.push(`6. Reports: wait got ${r.reports.delivered} ${r.reports.delivered === 1 ? 'report' : 'reports'}; longest from a job end to the next report: ${u ? `${Math.round(u.seconds)} s (${u.job}${u.read ? '' : ', still unread at the end of the journal'})` : '-'}`)
 
   const dmg = Object.entries(r.damage).sort((a, b) => b[1].count - a[1].count)
-    .map(([cause, g]) => `${cause} ${g.count}${Object.keys(g.sources).length ? `（${Object.entries(g.sources).map(([k, n]) => `${k} ${n}`).join('，')}）` : ''}`)
-  out.push(`7. 受伤：${dmg.join('；') || '无'}`)
+    .map(([cause, g]) => `${cause} ${g.count}${Object.keys(g.sources).length ? ` (${Object.entries(g.sources).map(([k, n]) => `${k} ${n}`).join(', ')})` : ''}`)
+  out.push(`7. Damage: ${dmg.join('; ') || 'none'}`)
   return out.join('\n')
 }

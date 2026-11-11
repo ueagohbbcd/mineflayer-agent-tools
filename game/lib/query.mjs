@@ -10,7 +10,7 @@ import { errorText, text } from './describe.mjs'
 export async function loadDefault (file) {
   const mtime = fs.statSync(file).mtimeMs
   const mod = await import(`${pathToFileURL(file).href}?v=${mtime}`)
-  if (typeof mod.default !== 'function') throw new Error(`${file} 没有 export default async function (bot, ctx)`)
+  if (typeof mod.default !== 'function') throw new Error(`${file} has no export default async function (bot, ctx)`)
   return mod.default
 }
 
@@ -22,7 +22,7 @@ export async function runQuery (bot, file, { args = [], timeoutMs = 10000 } = {}
     .then(result => ({ ok: true, result }), error => ({ ok: false, error: errorText(error) }))
   let timer
   const late = new Promise(resolve => {
-    timer = setTimeout(() => { ac.abort(); resolve({ ok: false, error: `查询 ${timeoutMs / 1000} 秒没有返回` }) }, timeoutMs)
+    timer = setTimeout(() => { ac.abort(); resolve({ ok: false, error: `the query did not return within ${timeoutMs / 1000} s` }) }, timeoutMs)
   })
   const out = await Promise.race([run, late])
   clearTimeout(timer)

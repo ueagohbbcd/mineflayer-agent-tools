@@ -45,10 +45,10 @@ export function watchDamage (bot) {
       if (!recent.length) return ''
       const groups = new Map()
       for (const h of recent) {
-        const key = h.source ? `${h.type}（${h.source}）` : h.type
+        const key = h.source ? `${h.type} (${h.source})` : h.type
         groups.set(key, (groups.get(key) ?? 0) + 1)
       }
-      return `上次报告以来受伤 ${recent.length} 次：${[...groups].map(([k, n]) => `${k}×${n}`).join(', ')}；最低血量 ${Math.min(...recent.map(h => h.health))}`
+      return `hurt ${recent.length} ${recent.length === 1 ? 'time' : 'times'} since the last report: ${[...groups].map(([k, n]) => `${k}×${n}`).join(', ')}; lowest health ${Math.min(...recent.map(h => h.health))}`
     }
   }
 }

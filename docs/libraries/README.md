@@ -25,7 +25,7 @@ Two shared rules run through all of them: unknown is never air, and every rememb
 
 ## Example programs
 
-`examples/*.mjs` are short modules, each showing one way to do a task that the game's experimental code and plugins do not already show: reach maps and place graphs, terrain summaries, pictures, and a few read-only lookups. Agents read them, run them (`node game.mjs query <toolkit>/examples/reach-map.mjs`), import them from their own tasks, or copy and change them. Travelling is `game/experimental/goto.mjs`; fighting and eating are the reflexes in `game/experimental/reflexes.mjs`, backed by mineflayer-pvp and mineflayer-auto-eat. The examples need `vec3` installed beside this package. `examples/make-demo-cache.js` writes the synthetic cache used by the [visual demo](visual.md#start-with-the-synthetic-demo). Their tests are in `test/examples/`.
+`examples/*.mjs` are short modules, each showing one way to do a task that the game's experimental code and plugins do not already show: reach maps and place graphs, terrain summaries, pictures, and a few read-only lookups. Agents read them, run them (`node game.mjs query <toolkit>/examples/reach-map.mjs`), import them from their own tasks, or copy and change them. Travelling is `walkTo` in `game/experimental/walk-to.mjs`; fighting and eating are the reflexes in `game/experimental/reflexes.mjs`, backed by mineflayer-pvp and mineflayer-auto-eat. The examples need `vec3` installed beside this package. `examples/make-demo-cache.js` writes the synthetic cache used by the [visual demo](visual.md#start-with-the-synthetic-demo). Their tests are in `test/examples/`.
 
 ## Tests
 

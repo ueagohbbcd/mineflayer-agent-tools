@@ -29,14 +29,14 @@ import { loadDefault } from './query.mjs'
 
 export class ExitRequested extends Error {
   constructor (reason) {
-    super(`退出：${reason}`)
+    super(`exit: ${reason}`)
     this.name = 'ExitRequested'
     this.reason = reason
   }
 }
 
 const RANK = { preempt: 1, cancel: 2, replace: 2, death: 3 }
-const EXIT_RULE = '每次 await 之后检查 ctx.signal.aborted，为真就返回'
+const EXIT_RULE = 'after every await, check ctx.signal.aborted and return if it is true'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 export function createHost (bot, {
@@ -92,18 +92,18 @@ export function createHost (bot, {
     const why = reasons
     reasons = []
     const lines = []
-    lines.push(why.length ? `唤醒原因：\n${why.map(r => `  ${r}`).join('\n')}` : '唤醒原因：无新唤醒')
-    lines.push(`现在：${describeNow({ alive, job, controller })}`)
-    if (ends > reportedEndSeq && job?.status === 'ended') lines.push(`最近结束的作业：${formatJob(job)}`)
+    lines.push(why.length ? `Woke because:\n${why.map(r => `  ${r}`).join('\n')}` : 'Woke because: nothing new')
+    lines.push(`Now: ${describeNow({ alive, job, controller })}`)
+    if (ends > reportedEndSeq && job?.status === 'ended') lines.push(`Last job: ${formatJob(job)}`)
     for (const [name, fn] of reports) {
       try {
         const out = await Promise.race([
           Promise.resolve().then(() => fn(bot)),
-          sleep(reportTimeoutMs).then(() => { throw new Error(`${reportTimeoutMs / 1000} 秒没有返回`) })
+          sleep(reportTimeoutMs).then(() => { throw new Error(`no answer within ${reportTimeoutMs / 1000} s`) })
         ])
         if (out) lines.push(`== ${name} ==\n${text(out).trimEnd()}`)
       } catch (error) {
-        lines.push(`== ${name} ==\n报告出错：${errorText(error)}`)
+        lines.push(`== ${name} ==\nreport failed: ${errorText(error)}`)
       }
     }
     consumedGen = Math.max(consumedGen, gen)
@@ -160,15 +160,15 @@ export function createHost (bot, {
     emit('job_end', summary)
     emitJob('result', { summary }, j)
     j.sinks.clear()
-    wake(`作业 ${j.id} ${endWord(j)}`)
+    wake(`job ${j.id} ${endWord(j)}`)
   }
 
   // ---- controllers ---------------------------------------------------------
   async function runCleanups (ctrl) {
     for (const fn of ctrl.cleanups.splice(0).reverse()) {
-      try { await fn() } catch (error) { log(`清理出错（${ctrl.name}）：${errorText(error)}`) }
+      try { await fn() } catch (error) { log(`cleanup failed (${ctrl.name}): ${errorText(error)}`) }
     }
-    try { await cleanup(bot) } catch (error) { log(`游戏清理出错：${errorText(error)}`) }
+    try { await cleanup(bot) } catch (error) { log(`game cleanup failed: ${errorText(error)}`) }
   }
 
   /** Make `run(ctx, ctrl)` the controller; settle() runs when it settles. */
@@ -186,7 +186,7 @@ export function createHost (bot, {
       .then(() => run(ctx, ctrl))
       .then(value => ({ ok: true, value }), error => ({ ok: false, error }))
       .then(outcome => settle(ctrl, outcome))
-      .catch(error => log(`交接出错：${error?.stack ?? error}`))
+      .catch(error => log(`handover failed: ${error?.stack ?? error}`))
   }
 
   /**
@@ -218,9 +218,9 @@ export function createHost (bot, {
     if (controller !== ctrl || ctrl.phase !== 'exiting') return
     ctrl.phase = 'stuck'
     const last = ctrl.job?.log.at(-1)
-    const msg = `${describeController(ctrl)} 收到退出请求（${ctrl.why}）后 ${graceMs / 1000} 秒没有退出，仍占着角色` +
-      `${last ? `；它最后输出的一行：${last}` : ''}。任务要做到：${EXIT_RULE}。` +
-      '现在要恢复就重启游戏进程：node game.mjs stop，然后重新启动 main。'
+    const msg = `${describeController(ctrl)} has not exited ${graceMs / 1000} s after the exit request (${ctrl.why}) and still holds the character` +
+      `${last ? `; its last log line: ${last}` : ''}. A task must do this: ${EXIT_RULE}. ` +
+      'To recover now, restart main: node game.mjs stop, then start main again.'
     log(msg)
     emit('stuck', { kind: ctrl.kind, name: ctrl.name, why: ctrl.why, last })
     emitJob('event', msg, ctrl.job)
@@ -233,10 +233,10 @@ export function createHost (bot, {
     const asked = ctrl.phase !== 'running'
     const wasStuck = ctrl.phase === 'stuck'
     ctrl.phase = 'done'
-    emit('settle', { kind: ctrl.kind, name: ctrl.name, stuck: wasStuck, outcome: asked ? `退出（${ctrl.why}）` : outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${errorText(outcome.error)}` })
+    emit('settle', { kind: ctrl.kind, name: ctrl.name, stuck: wasStuck, outcome: asked ? `exited (${ctrl.why})` : outcome.ok ? `ended: ${text(outcome.value ?? 'done')}` : `error: ${errorText(outcome.error)}` })
     await runCleanups(ctrl)
     controller = null
-    if (wasStuck) wake(`${describeController(ctrl)} 终于退出了`)
+    if (wasStuck) wake(`${describeController(ctrl)} has exited at last`)
     // After an exit request the controller's own outcome (usually the abort)
     // does not matter: the recorded intent decides.
     proceed(ctrl, asked ? null : outcome)
@@ -258,8 +258,8 @@ export function createHost (bot, {
       end = outcome.ok ? { ok: true, value: outcome.value } : { ok: false, error: errorText(outcome.error) }
     }
     if (ctrl?.kind === 'reflex' && outcome) {
-      const after = outcome.ok ? `结束：${text(outcome.value ?? '完成')}` : `出错：${errorText(outcome.error)}`
-      emitJob('event', `[抢占] ${ctrl.name} ${after}`, j)
+      const after = outcome.ok ? `ended: ${text(outcome.value ?? 'done')}` : `failed: ${errorText(outcome.error)}`
+      emitJob('event', `[preempt] ${ctrl.name} ${after}`, j)
       if (!j) wake(`${ctrl.name} ${after}`)
       restart = ctrl.then === 'restart'
       end = { ok: false, preemptedBy: ctrl.name, reason: ctrl.reason, reflex: after }
@@ -268,7 +268,7 @@ export function createHost (bot, {
 
     if (alive && intent?.reflex) return startReflex(intent.reflex, running ? j : null)
     if (alive && restart && running) {
-      emitJob('event', `[重跑] 第 ${j.attempts + 1} 次尝试，从入口运行`, j)
+      emitJob('event', `[restart] attempt ${j.attempts + 1}, running the task from the top`, j)
       return startAttempt(j)
     }
     if (running && end) finishJob(j, end)
@@ -315,7 +315,7 @@ export function createHost (bot, {
   function idleEnded (outcome) {
     if (outcome.ok) return setTimeout(startIdle, 1000)
     idleErrors++
-    const msg = `idle 出错：${errorText(outcome.error)}`
+    const msg = `idle failed: ${errorText(outcome.error)}`
     log(msg)
     if (idleErrors <= 3) wake(msg)
     setTimeout(startIdle, 2000)
@@ -326,13 +326,13 @@ export function createHost (bot, {
     if (ctrl.ac.signal.aborted) throw ctrl.ac.signal.reason
     for (const [name, then] of Object.entries(spec)) {
       const reflex = reflexes[name]
-      if (!reflex) throw new Error(`没有名为 ${name} 的反射（已有：${Object.keys(reflexes).join(', ') || '无'}）`)
+      if (!reflex) throw new Error(`no reflex named ${name} (there are: ${Object.keys(reflexes).join(', ') || 'none'})`)
       if (typeof reflex.check !== 'function') continue
       let reason
-      try { reason = await reflex.check(bot) } catch (error) { reason = null; log(`反射 ${name} 检查出错：${errorText(error)}`) }
+      try { reason = await reflex.check(bot) } catch (error) { reason = null; log(`reflex ${name} check failed: ${errorText(error)}`) }
       if (reason) {
         preempt(name, { then, reason: text(reason) }, 'safepoint')
-        throw new ExitRequested(`抢占：${name}`)
+        throw new ExitRequested(`preempt: ${name}`)
       }
     }
   }
@@ -343,26 +343,26 @@ export function createHost (bot, {
    * goes to idle.
    */
   function preempt (name, { then = 'end', reason = '' } = {}, by = 'observer') {
-    if (!reflexes[name]) return { ok: false, error: `没有名为 ${name} 的反射` }
-    if (!alive) return { ok: false, error: '角色已死亡' }
-    if (next) return { ok: false, error: `退出进行中（${next.why}）` }
-    if (controller?.kind === 'reflex') return { ok: false, error: `反射 ${controller.name} 正在控制` }
+    if (!reflexes[name]) return { ok: false, error: `no reflex named ${name}` }
+    if (!alive) return { ok: false, error: 'the character is dead' }
+    if (next) return { ok: false, error: `an exit is in progress (${next.why})` }
+    if (controller?.kind === 'reflex') return { ok: false, error: `reflex ${controller.name} is in control` }
     const j = controller?.kind === 'task' ? controller.job : null
-    const thenWord = !j ? '' : then === 'restart' ? '，之后从入口重跑任务' : '，之后结束作业、转 idle'
-    const msg = `${name} 抢占（${reason || '无原因'}）${thenWord}`
+    const thenWord = !j ? '' : then === 'restart' ? ', then the task runs again from the top' : ', then the job ends and idle takes over'
+    const msg = `${name} preempts (${reason || 'no reason given'})${thenWord}`
     log(msg)
     emit('preempt', { reflex: name, then, reason, by, job: j?.id })
-    emitJob('event', `[抢占] ${msg}`, j)
+    emitJob('event', `[preempt] ${msg}`, j)
     wake(msg)
-    const done = requestExit({ kind: 'preempt', why: `抢占：${name}`, reflex: { name, then, reason } })
+    const done = requestExit({ kind: 'preempt', why: `preempt: ${name}`, reflex: { name, then, reason } })
     return { ok: true, done }
   }
 
   /** Submit a task file as the job. A running job is replaced. */
   async function submit (file, { args = [], sink } = {}) {
-    if (!alive) return { ok: false, error: '角色已死亡，等重生后再提交' }
+    if (!alive) return { ok: false, error: 'the character is dead; submit again after respawn' }
     const abs = path.resolve(file)
-    if (!fs.existsSync(abs)) return { ok: false, error: `找不到文件 ${abs}` }
+    if (!fs.existsSync(abs)) return { ok: false, error: `file not found: ${abs}` }
     const j = {
       id: `j${++jobSeq}-${path.basename(abs, path.extname(abs))}`,
       file: abs,
@@ -375,22 +375,22 @@ export function createHost (bot, {
     }
     emit('job', { id: j.id, file: abs, args })
     const replacing = job?.status === 'running'
-    const intent = { kind: 'replace', why: replacing ? '被新作业替换' : '开始新作业', end: { ok: false, ended: 'replaced' }, start: j }
+    const intent = { kind: 'replace', why: replacing ? 'replaced by a new job' : 'a new job starts', end: { ok: false, ended: 'replaced' }, start: j }
     if (!(await requestExit(intent))) {
       // The new job will not start; the old one ends as cancelled whenever it exits.
-      if (next === intent) next = { kind: 'cancel', why: intent.why, end: { ok: false, ended: 'cancelled', reason: '换作业时不肯退出' } }
-      return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
+      if (next === intent) next = { kind: 'cancel', why: intent.why, end: { ok: false, ended: 'cancelled', reason: 'would not exit for a new job' } }
+      return { ok: false, error: `${describeController(controller)} will not exit; main needs a restart` }
     }
-    if (job !== j) return { ok: false, error: alive ? '这次提交被之后的提交或取消取代，没有开始' : '角色已死亡，作业没有开始' }
+    if (job !== j) return { ok: false, error: alive ? 'a later submit or cancel overtook this submit; it did not start' : 'the character is dead; the job did not start' }
     return { ok: true, id: j.id, job: j }
   }
 
   /** Explicit cancel: the exit flow, and nothing queued runs afterwards. */
-  async function cancel (reason = '已取消') {
+  async function cancel (reason = 'cancelled') {
     const j = job?.status === 'running' ? job : null
-    if (!j) return { ok: true, note: '没有正在进行的作业' }
+    if (!j) return { ok: true, note: 'no job running' }
     if (!(await requestExit({ kind: 'cancel', why: reason, end: { ok: false, ended: 'cancelled', reason } }))) {
-      return { ok: false, error: `${describeController(controller)} 不肯退出，需要重启游戏进程` }
+      return { ok: false, error: `${describeController(controller)} will not exit; main needs a restart` }
     }
     return { ok: true, summary: summarizeJob(j) }
   }
@@ -405,15 +405,15 @@ export function createHost (bot, {
     const where = here()
     emit('death', { where, job: job?.status === 'running' ? job.id : null, controller: controller && `${controller.kind} ${controller.name}` })
     if (controller || job?.status === 'running') {
-      requestExit({ kind: 'death', why: '死亡', end: { ok: false, ended: 'death', where } })
+      requestExit({ kind: 'death', why: 'death', end: { ok: false, ended: 'death', where } })
     }
-    wake(`死亡，位置 ${where}`)
+    wake(`died at ${where}`)
   })
   bot.on('spawn', () => {
     if (alive || (bot.health ?? 20) <= 0) return
     alive = true
     emit('respawn', { where: here() })
-    wake(`重生，位置 ${here()}`)
+    wake(`respawned at ${here()}`)
     setTimeout(startIdle, 500)
   })
 

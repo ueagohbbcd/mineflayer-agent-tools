@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Unused material: nothing imports this file and the template does not wire
-// it in. A danger observer that detects risk signs (lit TNT, swelling creeper,
-// moving projectile, a mob targeting you, big or repeated health loss) and
-// posts them through a `log` such as observers/record.mjs.
+// A danger observer that the template does not wire in: it detects risk signs
+// (lit TNT, swelling creeper, moving projectile, a mob targeting you, big or
+// repeated health loss) and posts them through a `log` such as record.mjs.
+// It only records; preempting is game/experimental/preempt-when-hurt.mjs.
 //
 // - health_loss (urgent for a large or repeated loss), hurt, critical_health
 //   (urgent) from the game's own health and hurt events;
@@ -13,7 +13,7 @@
 //   (air at or below 8 of 20, again after it was back to 16): recorded only.
 import { watchObservation } from "../observation/events.mjs";
 import { minimalDangerSample } from "../observation/snapshot.mjs";
-import { createPendingWrites } from "../observers/support.mjs";
+import { createPendingWrites } from "./support.mjs";
 
 const KEEP = new Set(["health_loss", "hurt", "critical_health"]);
 const STAMP = ["observedAt", "sampledAt", "epoch", "sequence"];

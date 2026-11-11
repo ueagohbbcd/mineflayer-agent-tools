@@ -14,32 +14,32 @@ Killing the `run` command only stops its output; the job goes on. `node game.mjs
 ## The task contract
 
 ```js
-import { goto } from "mineflayer-world-memory/game/experimental/goto.mjs";
+import { walkTo } from "mineflayer-world-memory/game/experimental/walk-to.mjs";
 
 export default async function task(bot, ctx) {
   const [x, y, z] = ctx.args.map(Number); // the words after the file name
   ctx.log("on my way");                   // a line in the run output and the result
-  await goto(bot, ctx, [x, y, z]);         // toolkit functions stop by themselves
+  await walkTo(bot, ctx, [x, y, z]);       // toolkit functions stop by themselves
   if (ctx.signal.aborted) return;          // the exit rule, after your own awaits
   return bot.entity.position.floored();    // the result
 }
 ```
 
 - `ctx.args`, `ctx.log`, `ctx.signal` are all a task needs. `tasks/example.mjs` is a complete one.
-- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`goto`, `craftChecked`) needs no exit code at all.
+- **The one exit rule: after an await, if `ctx.signal.aborted`, return.** The signal aborts on cancel, a new job, a preempt and death; main then stops Pathfinder, fighting, digging, eating and open windows. A task that only calls toolkit functions (`walkTo`, `craftAndCount`) needs no exit code at all.
 - The return value is the result; a thrown error is the failure, with its message.
 - A task that keeps going after the abort keeps the character: nothing else starts, and `wait` tells you main needs a restart.
 
 ## What ends a job without you asking
 
 - **Death.** The job ends; idle starts after respawn. The report has where you died and where you respawned.
-- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `defend` reflex; your head stuck in a block starts `escape`. The job ends with the reflex's result.
+- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `fightOrFlee` reflex; your head stuck in a block starts `digHeadFree`. The job ends with the reflex's result.
 
 Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
 ## Between jobs
 
-Idle keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
+Idle (`stayAlive` in main) keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
 
 ## Commands
 

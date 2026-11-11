@@ -9,11 +9,11 @@ export default async function task (bot, ctx) {
   while (Date.now() < until) {
     await new Promise(resolve => setTimeout(resolve, 500))
     if (ctx.signal.aborted) {
-      ctx.log(`收到退出（${ctx.signal.reason?.reason ?? ctx.signal.reason}），3 秒后返回`)
+      ctx.log(`exit requested (${ctx.signal.reason?.reason ?? ctx.signal.reason}), returning in 3 s`)
       await new Promise(resolve => setTimeout(resolve, 3000))
       return 'exited slowly'
     }
-    if (++n % 10 === 0) ctx.log(`仍在运行，血 ${Math.round(bot.health)}`)
+    if (++n % 10 === 0) ctx.log(`still running, health ${Math.round(bot.health)}`)
   }
   return 'time up'
 }

@@ -53,9 +53,9 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   const ok = await cmd(dir, ['run', task('ok.mjs', 'export default async (bot, ctx) => { ctx.log("step 1"); return 7 }')])
   assert.equal(ok.code, 0)
   assert.match(ok.stdout, /step 1/)
-  assert.match(ok.stdout, /结果：7/)
+  assert.match(ok.stdout, /result: 7/)
   const w1 = await cmd(dir, ['wait'], { timeout: 3000 })
-  assert.match(w1.stdout, /最近结束的作业：j1-ok 完成/)
+  assert.match(w1.stdout, /Last job: j1-ok done/)
   assert.match(w1.stdout, /== status ==\nhp 20/)
 
   // Nothing pending now: wait blocks until a running task wakes it; the task goes on.
@@ -65,20 +65,20 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   }`)])
   const w2 = await cmd(dir, ['wait'], { timeout: 5000 })
   assert.match(w2.stdout, /halfway/)
-  assert.match(w2.stdout, /j2-long 进行中/)
+  assert.match(w2.stdout, /j2-long running/)
 
   // Killing the run command does not cancel the job.
   long.child.kill('SIGKILL')
   await long.done
   await sleep(100)
   const st = await cmd(dir, ['status'])
-  assert.match(st.stdout, /当前作业：j2-long/)
+  assert.match(st.stdout, /current job: j2-long/)
   assert.match(st.stdout, new RegExp(`pid ${main.pid}`))
 
   // Cancel does.
   const c = await cmd(dir, ['cancel'])
   assert.equal(c.code, 0)
-  assert.match(c.stdout, /已取消/)
+  assert.match(c.stdout, /cancelled/)
 
   // A wake while nobody waits is kept for the next wait.
   await cmd(dir, ['wait'], { timeout: 3000 }) // takes the cancel
@@ -91,7 +91,7 @@ test('run, wait, wake from another point, client loss, cancel, blocked main', as
   await sleep(200)
   bg(dir, ['run', task('busy.mjs', 'export default async () => { const t = Date.now() + 4000; while (Date.now() < t) {} }')])
   assert.equal(await waiting.done, 1)
-  assert.match(waiting.out(), /主线程/)
+  assert.match(waiting.out(), /main's thread/)
 })
 
 test('one main per project: a second one exits with a message; a stale socket is replaced', async t => {
@@ -100,26 +100,26 @@ test('one main per project: a second one exits with a message; a stale socket is
   t.after(() => first.kill('SIGKILL'))
   const second = await runMain(dir)
   assert.equal(second.code, 0)
-  assert.match(second.stdout, new RegExp(`main 已在运行（pid ${first.pid}，`))
-  assert.match((await cmd(dir, ['status'])).stdout, /角色活着/)
+  assert.match(second.stdout, new RegExp(`main is already running for this project \\(pid ${first.pid}, `))
+  assert.match((await cmd(dir, ['status'])).stdout, /character: alive/)
 
   // A main killed outright leaves its socket file behind; nothing answers on it.
   first.kill('SIGKILL')
   await new Promise(resolve => first.once('exit', resolve))
   assert.ok(fs.existsSync(path.join(dir, '.game/main.sock')))
-  assert.match((await cmd(dir, ['status'])).stdout, /main 没有在运行/)
+  assert.match((await cmd(dir, ['status'])).stdout, /main is not running/)
 
   // The next main takes the socket over; until it has a host it says it is starting.
   const next = await startMain(dir, { until: 'entry open', env: { START_DELAY_MS: '1500' } })
   t.after(() => next.kill('SIGKILL'))
   const early = await cmd(dir, ['status'])
   assert.equal(early.code, 1)
-  assert.match(early.stdout, /main 正在启动/)
+  assert.match(early.stdout, /main is starting/)
   await new Promise(resolve => next.stdout.on('data', d => { if (String(d).includes('ready')) resolve() }))
   fs.writeFileSync(path.join(dir, 'ok.mjs'), 'export default async () => 1')
   assert.equal((await cmd(dir, ['run', path.join(dir, 'ok.mjs')])).code, 0)
 
   // stop ends it by the pid from its status reply.
   const stop = await cmd(dir, ['stop'])
-  assert.match(stop.stdout, new RegExp(`main（pid ${next.pid}）已退出`))
+  assert.match(stop.stdout, new RegExp(`main \\(pid ${next.pid}\\) exited`))
 })

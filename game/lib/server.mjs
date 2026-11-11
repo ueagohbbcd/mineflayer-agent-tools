@@ -63,7 +63,7 @@ export async function openEntry (dir) {
       } catch {
         return end(conn, { type: 'error', error: 'bad request' })
       }
-      if (!entry.host) return end(conn, { type: 'error', error: 'main 正在启动，还没有进入游戏', ...me })
+      if (!entry.host) return end(conn, { type: 'error', error: 'main is starting and has not joined the game yet', ...me })
       handle(entry, request, conn).catch(error => end(conn, { type: 'error', error: error?.message ?? String(error) }))
     })
   })
@@ -73,8 +73,8 @@ export async function openEntry (dir) {
     if (error.code !== 'EADDRINUSE') throw error
     const other = await probe(sock)
     if (other) {
-      const who = other.pid ? `（pid ${other.pid}，${other.since} 启动）` : ''
-      console.log(`这个项目的 main 已在运行${who}。要重启先运行 node game.mjs stop。`)
+      const who = other.pid ? ` (pid ${other.pid}, started ${other.since})` : ''
+      console.log(`main is already running for this project${who}. To restart it, run node game.mjs stop first.`)
       process.exit(0)
     }
     fs.rmSync(sock, { force: true })
@@ -152,7 +152,7 @@ async function handle ({ host, me }, request, conn) {
       conn.on('close', () => left.abort())
       const report = await host.waitForReport(left.signal)
       if (report === null) return // the waiter left; nothing was consumed
-      if (conn.destroyed) return host.wake('上一次 wait 在报告送达前断开')
+      if (conn.destroyed) return host.wake('the last wait disconnected before its report arrived')
       return end(conn, { type: 'report', text: report })
     }
     case 'query':

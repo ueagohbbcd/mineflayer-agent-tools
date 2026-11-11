@@ -18,11 +18,11 @@ Useful goals: `GoalBlock` (stand in that cell), `GoalNear` (within a range), `Go
 
 ## Check arrival
 
-`goto` resolves when Pathfinder emits `goal_reached`, but also on an empty path, which it reports for some cases with no route. So after `goto`, check arrival the way Pathfinder decides `goal_reached`: `goal.isEnd(feet) || goal.isEnd(feet.offset(0, 1, 0))` with `feet = bot.entity.position.floored()`. Do not add a stricter distance of your own: `GoalNear` accepts a range on purpose, and a second threshold turns real arrivals into failures. If the next step needs an exact spot, use a goal that says so (`GoalBlock`).
+`bot.pathfinder.goto` resolves when Pathfinder emits `goal_reached`, but also on an empty path, which it reports for some cases with no route. So after it resolves, check arrival the way Pathfinder decides `goal_reached`: `goal.isEnd(feet) || goal.isEnd(feet.offset(0, 1, 0))` with `feet = bot.entity.position.floored()`. Do not add a stricter distance of your own: `GoalNear` accepts a range on purpose, and a second threshold turns real arrivals into failures. If the next step needs an exact spot, use a goal that says so (`GoalBlock`).
 
 ## After NoPath or a stall
 
-- `goto` rejects with `NoPath` when no route exists through the terrain the bot has received, and with a timeout when the search ran out of time. A goal far away is often outside loaded chunks: walk part of the way and try again from there.
+- `bot.pathfinder.goto` rejects with `NoPath` when no route exists through the terrain the bot has received, and with a timeout when the search ran out of time. A goal far away is often outside loaded chunks: walk part of the way and try again from there.
 - Look before retrying the same goal. Read the blocks along the way, or take a picture (see [mineflayer-surroundings](mineflayer-surroundings.md)). Repeating the same failing goal is the most common way to waste time; the watchdog reports it as `repeat`.
 - If the bot moves less than a block for half a minute while a goal is set, it is stuck: against a wall, in water, or on a ledge Pathfinder misjudges. Stop, look, and choose another route or let it dig or place.
 
@@ -30,7 +30,7 @@ Useful goals: `GoalBlock` (stand in that cell), `GoalNear` (within a range), `Go
 
 `bot.pathfinder.stop()` only asks Pathfinder to stop at the next path node. Before you use the main hand (eat, place, attack), wait until all three are true:
 
-1. The original `goto` has rejected with `PathStopped`.
+1. The original `bot.pathfinder.goto` has rejected with `PathStopped`.
 2. The bot is on the ground (`bot.entity.onGround`).
 3. Pathfinder is not digging or placing (`bot.pathfinder.isMining()` and `bot.pathfinder.isBuilding()` are false).
 
@@ -42,5 +42,5 @@ Once you know a place, write down a few footholds you will come back to: one per
 
 ## Examples
 
-- [goto.mjs](../../../game/experimental/goto.mjs): the one way to travel in a task: a trip that ends when it arrives, finds no path or stalls, checking arrival as above.
+- [walk-to.mjs](../../../game/experimental/walk-to.mjs): `walkTo`, the one way to travel in a task: a trip that ends when it arrives, finds no path or stalls, checking arrival as above.
 - [reach-map.mjs](../../../examples/reach-map.mjs), [profile.mjs](../../../examples/profile.mjs) and [place-graph.mjs](../../../examples/place-graph.mjs): where you can walk from here, the ground along a line, and which waypoints connect (read-only).

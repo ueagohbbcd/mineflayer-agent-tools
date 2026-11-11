@@ -33,7 +33,7 @@ export function watchObservation(
     inventoryWatchItems = [],
     inventoryWatchType = "inventory_watch",
     // Death and disconnect reports; off where something else reports them
-    // (danger-alerts.mjs turns them off: the host reports death itself).
+    // (observers/danger-alerts.mjs turns them off: the host reports death itself).
     lifecycleEvents = true,
     onError,
     ...sampleOptions

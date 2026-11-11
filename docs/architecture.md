@@ -14,7 +14,7 @@ game.mjs（每条命令一个短进程）
   ▼
 main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件）
   ├─ 核心 host：一个作业、一个控制者、退出流程、唤醒标记、报告函数
-  │     控制者三选一：任务（模型写的）｜反射（defend、escape、eat）｜idle
+  │     控制者三选一：任务（模型写的）｜反射（fightOrFlee、digHeadFree、eatWhenHungry）｜idle（stayAlive）
   ├─ 观察器：听 bot 的事件，写记录、提供报告、在危险时请求抢占
   ├─ 插件适配：pathfinder、pvp、auto-eat、armor-manager、tool、collectblock
   └─ bot（Mineflayer）──► Minecraft 服务器
@@ -41,8 +41,8 @@ main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件�
 | `game/lib/server.mjs`、`game/bin/game.mjs` | socket 两端：六个命令 | 每条命令 |
 | `game/lib/plugins.mjs` | 生态插件的加载、默认设置和已知怪行为的处理 | main 启动时和每次退出流程；升级插件时看这里 |
 | `game/lib/` 其余 | 给模型看的措辞、查询加载、合成修复、1.21.1 兼容 | 核心和模板调用 |
-| `game/observers/` | 报告函数和记录器：状态、周围、受伤、聊天、探索；`journal` 把核心事件写成时间线 `records/journal.jsonl`，`review` 从中算出一页回顾 | `wait` 返回时；持续写 `records/`；回顾一局时 `node report.mjs review` |
-| `game/experimental/` | 还在试用的控制逻辑：反射、idle、危险时请求抢占、走路、合成；附实机记录 | 模板默认接上；模型可以复制改写 |
+| `game/observers/` | 报告函数和记录器：状态、周围、受伤、聊天、探索、危险迹象（`danger-alerts`，模板没有接入）；`journal` 把核心事件写成时间线 `records/journal.jsonl`，`review` 从中算出一页回顾 | `wait` 返回时；持续写 `records/`；回顾一局时 `node report.mjs review` |
+| `game/experimental/` | 还在试用的控制逻辑：反射、idle 循环 `stayAlive`、受伤时请求抢占 `preemptWhenHurt`、走路 `walkTo`、合成并核对数量 `craftAndCount`；附实机记录 | 模板默认接上；模型可以复制改写 |
 | `game/template/` | 玩家项目的起点：`main.mjs`、玩家的一页 `AGENTS.md`、示例任务 | 开新项目时整个复制 |
 | `game/observation/`、`game/queries/`、`game/visual/` | 只读地看世界：快照、可达范围、地形、截图 | 模型按需用 `query` 调用 |
 | `game/dev/` | 开发者在真实服务器上验证用：RCON、场景清单、观察脚本 | 改了核心、插件或试验区之后 |
@@ -70,7 +70,7 @@ main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件�
 
 | 想做的事 | 去哪里 |
 | --- | --- |
-| 改变角色在危险时的反应 | `game/experimental/reflexes.mjs`、`danger-preempt.mjs`，然后照 `game/dev/SCENARIOS.md` 重跑相关场景 |
+| 改变角色在危险时的反应 | `game/experimental/reflexes.mjs`、`preempt-when-hurt.mjs`，然后照 `game/dev/SCENARIOS.md` 重跑相关场景 |
 | 让 `wait` 多报一样东西 | 在 `game/observers/` 加一个报告函数，在模板 `main.mjs` 里注册 |
 | 处理某个插件的怪行为 | `game/lib/plugins.mjs`，并在教训里记一条 |
 | 给游玩模型加一条提醒 | `game/template/AGENTS.md`（一句话）或对应的 skill（有实质内容） |

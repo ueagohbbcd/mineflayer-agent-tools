@@ -76,25 +76,25 @@ function toolkitVersion () {
 }
 
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…` : s)
-const who = d => ({ task: `任务 ${d.name}`, reflex: `反射 ${d.name}`, idle: 'idle' }[d.kind] ?? d.name)
+const who = d => ({ task: `task ${d.name}`, reflex: `reflex ${d.name}`, idle: 'idle' }[d.kind] ?? d.name)
 
 /** One short line for a journal entry (without the time). */
 export function journalText ({ type, data: d = {} }) {
   switch (type) {
-    case 'main_start': return `main 启动（pid ${d.pid}${d.toolkit?.commit ? `，工具箱 ${d.toolkit.commit}` : ''}）`
-    case 'main_stop': return `main 停止（退出码 ${d.code}）`
-    case 'job': return `提交 ${d.id}（${path.basename(d.file ?? '')}${d.args?.length ? ` ${d.args.join(' ')}` : ''}，版本 ${d.hash ?? '?'}${d.snapshot ? '，新' : ''}）`
-    case 'control': return d.kind === 'task' ? `${d.name} 第 ${d.attempt} 次尝试开始` : `${who(d)} 开始`
-    case 'settle': return `${who(d)} ${d.outcome}${d.stuck ? '（卡住之后）' : ''}`
-    case 'preempt': return `${d.reflex} 抢占（${d.reason || '无原因'}，来自 ${d.by}，之后 ${d.then}）`
-    case 'stuck': return `${who(d)} 卡住（${d.why}）`
-    case 'job_end': return `作业 ${d.id} ${d.end}（${d.seconds} 秒，${d.attempts} 次尝试）`
-    case 'death': return `死亡 @ ${d.where}（${d.controller ?? '无控制者'}）`
-    case 'respawn': return `重生 @ ${d.where}`
-    case 'wake': return `唤醒：${d.reason ?? ''}`
-    case 'report': return `wait 收到报告（${d.text?.length ?? 0} 字）`
-    case 'damage': return `受伤 ${d.cause}${d.source ? `（${d.source}）` : ''}，血 ${d.health}`
-    case 'state': return `状态 血 ${d.health} 饥饿 ${d.food} @ ${d.pos} 手持 ${d.held ?? '空'}${d.inv ? ` 背包 ${clip(d.inv, 60)}` : ''}`
+    case 'main_start': return `main started (pid ${d.pid}${d.toolkit?.commit ? `, toolkit ${d.toolkit.commit}` : ''})`
+    case 'main_stop': return `main stopped (exit code ${d.code})`
+    case 'job': return `submitted ${d.id} (${path.basename(d.file ?? '')}${d.args?.length ? ` ${d.args.join(' ')}` : ''}, version ${d.hash ?? '?'}${d.snapshot ? ', new' : ''})`
+    case 'control': return d.kind === 'task' ? `${d.name} attempt ${d.attempt} started` : `${who(d)} started`
+    case 'settle': return `${who(d)} ${d.outcome}${d.stuck ? ' (after being stuck)' : ''}`
+    case 'preempt': return `${d.reflex} preempts (${d.reason || 'no reason given'}, from ${d.by}, then ${d.then})`
+    case 'stuck': return `${who(d)} stuck (${d.why})`
+    case 'job_end': return `job ${d.id} ${d.end} (${d.seconds} s, ${d.attempts} ${d.attempts === 1 ? 'attempt' : 'attempts'})`
+    case 'death': return `died at ${d.where} (${d.controller ?? 'no controller'})`
+    case 'respawn': return `respawned at ${d.where}`
+    case 'wake': return `wake: ${d.reason ?? ''}`
+    case 'report': return `wait got the report (${d.text?.length ?? 0} characters)`
+    case 'damage': return `hurt ${d.cause}${d.source ? ` (${d.source})` : ''}, health ${d.health}`
+    case 'state': return `state: health ${d.health} food ${d.food} at ${d.pos} held ${d.held ?? 'nothing'}${d.inv ? ` inventory ${clip(d.inv, 60)}` : ''}`
     default: return `${type} ${JSON.stringify(d)}`
   }
 }

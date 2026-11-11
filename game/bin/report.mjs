@@ -35,14 +35,14 @@ function read (name) {
 const sources = fs.existsSync(records) ? fs.readdirSync(records).filter(f => f.endsWith('.jsonl')).map(f => f.slice(0, -6)).sort() : []
 
 if (!source) {
-  if (!sources.length) console.log(`还没有记录（${records}）。main 启动后观察器才开始写。`)
+  if (!sources.length) console.log(`No records yet (${records}). The observers start writing once main runs.`)
   for (const name of sources) {
     const entries = read(name)
     const urgent = entries.filter(e => e.urgent).length
     const span = entries.length ? `${clock(entries[0].at)}–${clock(entries.at(-1).at)}` : ''
-    console.log(`${name}: ${entries.length} 条${urgent ? `（${urgent} 条 urgent）` : ''} ${span}`)
+    console.log(`${name}: ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${urgent ? ` (${urgent} urgent)` : ''} ${span}`)
   }
-  console.log('看某一项：node report.mjs <名称> [分钟]；这一局的回顾：node report.mjs review')
+  console.log('One source: node report.mjs <name> [minutes]; this game on one page: node report.mjs review')
   process.exit(0)
 }
 
@@ -57,10 +57,10 @@ const minutes = Number(minutesArg) || 10
 const since = Date.now() - minutes * 60000
 const entries = read(source).filter(e => Date.parse(e.at) >= since)
 if (!sources.includes(source)) {
-  console.log(`没有 ${source} 的记录；有：${sources.join(', ') || '无'}`)
+  console.log(`No records named ${source}; there are: ${sources.join(', ') || 'none'}`)
   process.exit(1)
 }
-console.log(`== ${source}：最近 ${minutes} 分钟 ${entries.length} 条 ==`)
+console.log(`== ${source}: ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} in the last ${minutes} minutes ==`)
 if (!entries.length) process.exit(0)
 let lines
 const observer = new URL(`../observers/${source}.mjs`, import.meta.url)

@@ -26,7 +26,7 @@ For exact positions use the snapshot query with `--full-entities`, or `entityRad
 
 ## Events
 
-`watchObservation` (used by `game/experimental/danger-alerts.mjs`, which is not wired into the template) reports these:
+`watchObservation` (used by the observer `game/observers/danger-alerts.mjs`, which is not wired into the template) reports these:
 
 | Event | When | Priority |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ All read only; import them from `<toolkit>/game/observation/` inside a task or q
 | `sampleObservation(bot, options)` | `index.mjs` | one synchronous sample, the shape of the snapshot's `state` |
 | `observe(bot, options)` | `observe.mjs` | `{state, metadata}`, what the snapshot query prints |
 | `entityRadar(bot, {radius, nameRadius, dropGroupRadius, entities})` | `index.mjs` | the `radar` section alone |
-| `watchObservation(bot, {post, ...thresholds})` | `index.mjs` | the event listeners (table above); `sample()`, `close()`. It reports `death` and `disconnected` (urgent) too, unless `lifecycleEvents: false` (`danger-alerts.mjs`'s setting: the host reports death itself) |
+| `watchObservation(bot, {post, ...thresholds})` | `index.mjs` | the event listeners (table above); `sample()`, `close()`. It reports `death` and `disconnected` (urgent) too, unless `lifecycleEvents: false` (the setting of `game/observers/danger-alerts.mjs`: the host reports death itself) |
 | `queryTreeCandidate({blockAt, seed})` | `queries.mjs` | the logs, leaf evidence and unknown edges of one tree |
 | `queryEntitiesIntersecting({entities, bounds})` | `queries.mjs` | entities whose box overlaps `bounds`, before placing a block |
 | `reachMap`, `reachGraph`, `terrainProfile`, `aroundSummary` | `reach.mjs` | where Pathfinder can take you and back (a north-up grid), the walkable surface along a line |
