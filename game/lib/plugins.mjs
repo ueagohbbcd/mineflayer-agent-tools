@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Everything about the ecosystem plugins in one place: loading them, the
-// walking-only Pathfinder default, and the stop-everything cleanup that the
-// exit flow runs. Observations behind each quirk: game/experimental/README.md.
+// walking-only Pathfinder default, the stop-everything cleanup that the exit
+// flow runs, and one Mineflayer quirk (air after respawn). Observations behind
+// each quirk: game/experimental/README.md.
 //
 //   await loadPlugins(bot)                    right after createBot
 //   createHost(bot, { cleanup: stopGameActions, ... })
 import pathfinderPkg from 'mineflayer-pathfinder'
+import { airIndex } from '../observation/snapshot.mjs'
 const { Movements } = pathfinderPkg
 
 // Optional plugins: a missing one is skipped and its bot.<name> stays undefined.
@@ -37,6 +39,10 @@ export async function loadPlugins (bot) {
   }
   bot.on('spawn', () => defaultMovements(bot))
   if (bot.entity) defaultMovements(bot) // spawned while the imports loaded
+  // Mineflayer keeps the entity's metadata across a respawn and the server
+  // sends no air value while it is full, so after a drowning death oxygenOf
+  // read the last value under water (-1, playtest 2026-11-10) until the next dive.
+  bot.on('respawn', () => { if (bot.entity?.metadata) delete bot.entity.metadata[airIndex(bot)] })
   return loaded
 }
 

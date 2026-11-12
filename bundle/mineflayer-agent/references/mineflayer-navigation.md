@@ -25,6 +25,8 @@ Useful goals: `GoalBlock` (stand in that cell), `GoalNear` (within a range), `Go
 - `bot.pathfinder.goto` rejects with `NoPath` when no route exists through the terrain the bot has received, and with a timeout when the search ran out of time. A goal far away is often outside loaded chunks: walk part of the way and try again from there.
 - Look before retrying the same goal. Read the blocks along the way, or take a picture (see [mineflayer-surroundings](mineflayer-surroundings.md)). Repeating the same failing goal is the most common way to waste time; the watchdog reports it as `repeat`.
 - If the bot moves less than a block for half a minute while a goal is set, it is stuck: against a wall, in water, or on a ledge Pathfinder misjudges. Stop, look, and choose another route or let it dig or place.
+- **Out of a pit or a mine:** walking-only movements cannot leave a hole you dug. `await climbToSurface(bot, ctx)` from `game/experimental/climb-to-surface.mjs` digs stairs up to open sky, one checked step at a time (no liquid next to the way, no sand or gravel above the head), and goes on from where it is when run again. Digging movements with scaffolding can do it too, but spend your blocks without telling you.
+- **Bound every search** that may dig: `bot.pathfinder.thinkTimeout` (ms per search), `bot.pathfinder.searchRadius` (blocks), and a time limit per target; with digging allowed an unbounded search filled main's memory in a playtest. Put the old values back in `ctx.cleanup`.
 
 ## Stopping Pathfinder before using the hand
 
@@ -42,5 +44,6 @@ Once you know a place, write down a few footholds you will come back to: one per
 
 ## Examples
 
+- [climb-to-surface.mjs](../../../game/experimental/climb-to-surface.mjs): `climbToSurface`, stairs up to open sky.
 - [walk-to.mjs](../../../game/experimental/walk-to.mjs): `walkTo`, the one way to travel in a task: a trip that ends when it arrives, finds no path or stalls, checking arrival as above.
 - [reach-map.mjs](../../../examples/reach-map.mjs), [profile.mjs](../../../examples/profile.mjs) and [place-graph.mjs](../../../examples/place-graph.mjs): where you can walk from here, the ground along a line, and which waypoints connect (read-only).

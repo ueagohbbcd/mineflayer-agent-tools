@@ -26,15 +26,15 @@
 | `lib/describe.mjs` | 核心给模型的文字（英文）：现在的状态、作业怎么结束、`run`/`cancel`/`status`/`wait` 打印的摘要 |
 | `lib/query.mjs` | 重新加载任务和查询文件；`runQuery` 在作业之外运行只读查询 |
 | `lib/server.mjs` | Unix socket：`openEntry` 在连接服务器前绑定，绑定成功就是这个项目唯一的 main；`serve` 之后请求才交给核心。主线程卡死检测（复用 `watchdog.js` 的 worker，写 `.game/blocked.json`，带 pid 供 `stop` 使用） |
-| `lib/plugins.mjs` | 生态插件的适配：加载 pathfinder、pvp、auto-eat、armor-manager、tool、collectblock（可选的没装就跳过）；只走路的 Pathfinder 设置（不挖、不搭），pvp 和 collectblock 的 `movements` 设为 null；退出流程里的游戏清理 `stopGameActions` |
+| `lib/plugins.mjs` | 生态插件的适配：加载 pathfinder、pvp、auto-eat、armor-manager、tool、collectblock（可选的没装就跳过）；只走路的 Pathfinder 设置（不挖、不搭），pvp 和 collectblock 的 `movements` 设为 null；退出流程里的游戏清理 `stopGameActions`；重生时清掉 Mineflayer 留下的旧空气值（否则 `oxygenOf` 读到溺水时的值） |
 | `lib/crafting-fix.mjs` | 1.21.1 连续合成错乱的修复：`bot.craft` 之后关窗口、清合成格和光标 |
 | `lib/minecraft-compat.mjs` | 1.21.1 配方包解析修正 |
-| `observers/` | 观察器和报告函数：`statusReport`（血、饥饿、氧气、时间、位置、装备、背包变化、死亡）、`radarReport`、`watchDamage`（伤害类型）、`watchChat`（私聊和点名会唤醒）；记录器 `explore`、`radar` 写 `records/`；`danger-alerts.mjs` 的 `startDanger` 记录危险迹象，只记录、不抢占，模板没有接入；`startJournal`（`journal.mjs`）把核心事件、main 的启动和停止、受伤、作业起止和死亡时的状态、每份 `wait` 报告写成这一局的时间线；`review.mjs` 从时间线算出一页回顾 |
-| `experimental/` | 试验区的控制逻辑（反射 `fightOrFlee`、`digHeadFree`、`eatWhenHungry`，idle 循环 `stayAlive`，受伤时请求抢占的观察器 `preemptWhenHurt`，走路 `walkTo`，合成并核对数量 `craftAndCount`），还不是例程，见 [experimental/README.md](experimental/README.md) |
+| `observers/` | 观察器和报告函数：`statusReport`（血、饥饿、氧气、时间、位置、装备、背包变化、死亡）、`upkeepReport`（工具坏了或快坏、饿了又没吃的、idle 和反射吃过打过逃过什么）、`radarReport`、`watchDamage`（伤害类型）、`watchChat`（私聊和点名会唤醒）；记录器 `explore`、`radar` 写 `records/`；`danger-alerts.mjs` 的 `startDanger` 记录危险迹象，只记录、不抢占，模板没有接入；`startJournal`（`journal.mjs`）把核心事件、main 的启动和停止、受伤、作业起止和死亡时的状态、每份 `wait` 报告写成这一局的时间线，启动时若上一次没有正常停止，给出 `previousEnd`，模板 main 用它唤醒一次（说出崩溃时间和丢掉的作业）；`review.mjs` 从时间线算出一页回顾 |
+| `experimental/` | 试验区的控制逻辑（反射 `fightOrFlee`、`digHeadFree`、`eatWhenHungry`、`surfaceForAir`，idle 循环 `stayAlive`，请求抢占的观察器 `preemptWhenHurt`、`preemptWhenDrowning`，走路 `walkTo`，合成并核对数量 `craftAndCount`，采集 `digNearby`、放置 `placeNear`、冶炼 `smeltItems`、穿护甲 `equipArmour`、回到地表 `climbToSurface`、封闭自己 `sealIn`），还不是例程，见 [experimental/README.md](experimental/README.md)；那里的"架构特性对照"说明哪个例程示范了架构的哪个特性 |
 | `template/` | 玩家项目的起点：`AGENTS.md`（玩家的一页说明，任务约定的唯一来源，`npm run build:bundle` 把它生成进 `skills/mineflayer-game/SKILL.md`）、`main.mjs`（可编辑；调用 `loadPlugins`，把 `stopGameActions` 作为清理传给核心）、`tasks/example.mjs`、`game.mjs`、`report.mjs` |
 | `bin/game.mjs` | `run`、`wait`、`cancel`、`query`、`status`、`stop` |
 | `bin/report.mjs` | 只读文件：`report.mjs [名称] [分钟]` 看记录器的记录；`report.mjs review [分钟] [--json]` 是这一局的一页回顾（概况、死亡、作业、控制者时间、反射、报告、受伤），`--json` 给对比试玩用的数字 |
-| `observation/`、`queries/`、`visual/` | 只读观察函数、快照查询、截图渲染器 |
+| `observation/`、`queries/`、`visual/` | 只读观察函数、快照查询和找方块的查询 `find-blocks.mjs`、截图渲染器 |
 | `dev/` | 本地验证：RCON、场地、测试任务、战斗和夜里的观察脚本（`fight.mjs`、`night.mjs`）；场景清单 [dev/SCENARIOS.md](dev/SCENARIOS.md) |
 
 ## 约定
@@ -43,10 +43,10 @@
 - **一个控制者。** 同一时刻只有任务、反射、idle 中的一个控制角色。控制者记录 `phase`（`running`、`exiting`、`stuck`），核心另记一个 `next`：退出之后做什么。
 - **退出流程。** 取消、换作业、抢占、死亡都走同一套：请求者在 `next` 里写下之后的安排，中止 `ctx.signal` → 运行 `ctx.cleanup` 登记的函数和注入的游戏清理 → 等控制者的 promise 结束 → 唯一的 settle 函数执行 `next`：先启动排队的反射，否则从入口开始新的一次尝试，否则结束作业；然后启动新作业或 idle。后来的请求按优先级覆盖先前的：死亡 > 取消 = 换作业 > 抢占，所以取消、换作业、死亡都会撤掉排队的反射。请求可以重复，只退出一次。
 - **不退出的控制者。** `graceMs`（5 秒）内没结束就仍是控制者、标为 `stuck`，唤醒模型，消息里带任务最后一行输出和退出规则；之后它结束时照常执行 `next`。兜底是重启 main，核心不包装 bot。
-- **任务约定。** `export default async function task(bot, ctx)`；基本成员 `ctx.args`、`ctx.log`、`ctx.signal`，退出规则只有一句：await 之后 `ctx.signal.aborted` 为真就返回；返回值是结果，抛错是失败。试验区的 `walkTo`、`craftAndCount` 和反射自己检查信号。进阶成员：`ctx.cleanup(fn)`、`ctx.wake(reason)`、`ctx.preempt(name, opts)`、`ctx.safepoint(spec)`、`ctx.attempt`。
+- **任务约定。** `export default async function task(bot, ctx)`；基本成员 `ctx.args`、`ctx.log`、`ctx.signal`，退出规则只有一句：await 之后 `ctx.signal.aborted` 为真就返回；返回值是结果，抛错是失败。试验区的函数和反射自己检查信号。进阶成员：`ctx.cleanup(fn)`、`ctx.wake(reason)`、`ctx.preempt(name, opts)`、`ctx.safepoint(spec)`、`ctx.attempt`。
 - **抢占。** `host.preempt(name, { then, reason })`。默认 `then: 'end'`：反射结束后作业结束，报告写明原因（结果里的 `preemptedBy`），模型决定是否重新提交。`then: 'restart'`（`ctx.safepoint({ eatWhenHungry: 'restart' })`）是可选的进阶用法：反射结束后任务从入口重跑，`ctx.attempt` 加一，`run` 命令不退出。
 - **死亡** 结束作业、撤掉排队的反射和重跑；重生后才进入 idle。反射迟到的完成不会重新拉起作业。
-- **唤醒。** 作业结束、死亡、重生、抢占、卡住、私聊或点名都会唤醒。没有 wait 时保存标记，下一次 `wait` 立即返回；多次唤醒合并（原因最多 8 条）；收报告期间来的唤醒留给下一次。作业结束是否已报告与标记分开记。
+- **唤醒。** 作业结束、死亡、重生、抢占、卡住、私聊或点名都会唤醒。没有 wait 时保存标记，下一次 `wait` 立即返回；多次唤醒合并（原因最多 8 条，同样的原因只列一次并注明次数，如 "(×3)"）；收报告期间来的唤醒留给下一次。作业结束是否已报告与标记分开记。
 - **报告。** `host.addReport(name, fn)` 注册返回文本的函数；`wait` 依次调用并拼接，某个出错或超时只打印一行错误。
 - **事件出口。** `createHost` 的 `onEvent(e)` 在提交作业、控制者开始和结束、抢占请求、卡住、作业结束、死亡、重生、唤醒、报告送达时收到一个小的普通对象（作业结束时就是 `run` 打印的摘要）；它抛的错被忽略。核心只有这一个出口，时间线由观察器 `journal.mjs` 写。
 - **查询** 与作业并行，只读是约定；超时只保证调用方不再等。

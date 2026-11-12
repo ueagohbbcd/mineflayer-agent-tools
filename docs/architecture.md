@@ -14,7 +14,7 @@ game.mjs（每条命令一个短进程）
   ▼
 main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件）
   ├─ 核心 host：一个作业、一个控制者、退出流程、唤醒标记、报告函数
-  │     控制者三选一：任务（模型写的）｜反射（fightOrFlee、digHeadFree、eatWhenHungry）｜idle（stayAlive）
+  │     控制者三选一：任务（模型写的）｜反射（fightOrFlee、digHeadFree、eatWhenHungry、surfaceForAir）｜idle（stayAlive）
   ├─ 观察器：听 bot 的事件，写记录、提供报告、在危险时请求抢占
   ├─ 插件适配：pathfinder、pvp、auto-eat、armor-manager、tool、collectblock
   └─ bot（Mineflayer）──► Minecraft 服务器
@@ -30,7 +30,7 @@ main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件�
 2. 任务直接操作 bot。`ctx.log` 的每一行实时出现在 `run` 的输出里。
 3. 作业以四种方式之一结束：任务返回（完成）或抛错（失败）；模型 `cancel` 或提交了新作业；反射抢占（被打到低血量、头卡进方块）；死亡。
 4. 无论哪种，核心都做同一件事：发退出信号，停下游戏动作，等任务返回，然后按记录下来的安排接着做（启动反射、结束作业、转 idle）。
-5. 作业结束会唤醒 `wait`。`wait` 返回时，核心依次调用报告函数，把原因、现状、血量、周围、受伤、背包变化拼成一份文本。
+5. 作业结束会唤醒 `wait`。`wait` 返回时，核心依次调用报告函数，把原因、现状、血量、工具和食物、周围、受伤、背包变化拼成一份文本。main 崩溃后重新启动时，第一次 `wait` 说出崩溃和丢掉的作业。
 6. 模型读报告，决定下一步，提交下一个作业。两个作业之间由 idle 保命。
 
 ## 仓库里每个地方的作用
@@ -42,7 +42,7 @@ main.mjs（常驻进程，持有 bot，玩家项目里的一个可编辑文件�
 | `game/lib/plugins.mjs` | 生态插件的加载、默认设置和已知怪行为的处理 | main 启动时和每次退出流程；升级插件时看这里 |
 | `game/lib/` 其余 | 给模型看的措辞、查询加载、合成修复、1.21.1 兼容 | 核心和模板调用 |
 | `game/observers/` | 报告函数和记录器：状态、周围、受伤、聊天、探索、危险迹象（`danger-alerts`，模板没有接入）；`journal` 把核心事件写成时间线 `records/journal.jsonl`，`review` 从中算出一页回顾 | `wait` 返回时；持续写 `records/`；回顾一局时 `node report.mjs review` |
-| `game/experimental/` | 还在试用的控制逻辑：反射、idle 循环 `stayAlive`、受伤时请求抢占 `preemptWhenHurt`、走路 `walkTo`、合成并核对数量 `craftAndCount`；附实机记录 | 模板默认接上；模型可以复制改写 |
+| `game/experimental/` | 还在试用的控制逻辑：反射、idle 循环 `stayAlive`、请求抢占的观察器 `preemptWhenHurt` 和 `preemptWhenDrowning`、走路 `walkTo`、合成并核对数量 `craftAndCount`，以及从试玩收来的例程（采集、放置、冶炼、穿护甲、回到地表、封闭自己）；附实机记录和架构特性对照 | 模板默认接上反射和观察器；模型先读例程再写自己的，可以复制改写 |
 | `game/template/` | 玩家项目的起点：`main.mjs`、玩家的一页 `AGENTS.md`、示例任务 | 开新项目时整个复制 |
 | `game/observation/`、`game/queries/`、`game/visual/` | 只读地看世界：快照、可达范围、地形、截图 | 模型按需用 `query` 调用 |
 | `game/dev/` | 开发者在真实服务器上验证用：RCON、场景清单、观察脚本 | 改了核心、插件或试验区之后 |

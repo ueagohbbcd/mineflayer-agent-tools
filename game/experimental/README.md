@@ -4,7 +4,7 @@
 
 升级规则：试验区的代码在两次真实试玩中用过、没有导致死亡或控制者卡住，就整理成例程；验证记录留在代码旁边（下面的表）。
 
-每件事只有一种做法：导航用 `walkTo`，还手和进食是反射（`reflexes.mjs`，基于 mineflayer-pvp 和 mineflayer-auto-eat）。第二种做法要有实机证据说明它在某种情况下更好才加进来。
+每件事只有一种做法：导航用 `walkTo`，采集用 `digNearby`，还手和进食是反射（`reflexes.mjs`，基于 mineflayer-pvp 和 mineflayer-auto-eat）。第二种做法要有实机证据说明它在某种情况下更好才加进来。
 
 这里的名字说清函数做什么，也只说这些（`walkTo`、`craftAndCount`、`fightOrFlee`）；不用一个词的基本名，因为基本名读起来像唯一正式的做法。
 
@@ -12,11 +12,57 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `reflexes.mjs` | 三个反射：`fightOrFlee`（拿最好的武器用 mineflayer-pvp 还手；低于 8 血开始逃，回到 14 血以上或 12 格内没有敌对生物才停，逃的方向在 16 个方向里选能走、不朝 6 格内敌对生物、终点离它们最远的一个，被逼到角落就还手；7 格内的苦力怕只躲不打）、`digHeadFree`（头在方块里就用 mineflayer-tool 换工具挖开，或后退）、`eatWhenHungry`（用 mineflayer-auto-eat 选食物、吃、换回原物品）；带 `check` 的可以用在任务的安全点 |
+| `reflexes.mjs` | 反射：`fightOrFlee`（拿最好的武器用 mineflayer-pvp 还手；低于 8 血开始逃，回到 14 血以上或 12 格内没有敌对生物才停，逃的方向在 16 个方向里选能走、不朝 6 格内敌对生物、终点离它们最远的一个，被逼到角落就还手；7 格内的苦力怕只躲不打）、`digHeadFree`（头在方块里就用 mineflayer-tool 换工具挖开，或后退）、`eatWhenHungry`（用 mineflayer-auto-eat 选食物、吃、换回原物品）；带 `check` 的可以用在任务的安全点 |
 | `stay-alive.mjs` | `stayAlive`：没有作业时的循环，模板用它做核心的 idle（`createHost(bot, { idle: stayAlive })`）：头在方块里就出来（`digHeadFree`）、被打就还手（`fightOrFlee`）、7 格内有苦力怕就躲（`fightOrFlee`）、在水里按住跳浮在水面、饿了或受伤且饥饿低于 18 时吃（`eatWhenHungry`） |
 | `preempt-when-hurt.mjs` | 观察器 `preemptWhenHurt`：被敌对生物打且血量低于 12 时让 `fightOrFlee` 抢占，窒息时让 `digHeadFree` 抢占；之后结束作业 |
-| `walk-to.mjs` | `walkTo(bot, ctx, [x, y, z], { range, stallMs, checks })`：用当前寻路设置走到坐标，每 0.5 秒检查一次；到达按 goal 判定核对脚和脚上一格；连续 3 次无路或 `stallMs`（20 秒）不前进时抛错，错误带寻路最后状态。`checks` 默认为空；给了才在每次检查时设安全点（进阶用法） |
-| `craft-and-count.mjs` | `craftAndCount(bot, ctx, name, count, table)`：按物品名合成；配方运行 ceil(count / 每次产出) 次，物品数量至少增加"次数 × 每次产出"才算成功，否则抛错 "crafting <物品>: wanted N, got M …"（依据：试玩里一次要 8 根木棍只到了 4 根） |
+| `walk-to.mjs` | `walkTo(bot, ctx, [x, y, z], { range, stallMs, checks, goal })`：用当前寻路设置走到坐标，每 0.5 秒检查一次；到达按 goal 判定核对脚和脚上一格；连续 3 次无路或 `stallMs`（20 秒）不前进时抛错，错误带寻路最后状态。`checks` 默认为空；给了才在每次检查时设安全点（进阶用法）。`goal` 换掉默认的 GoalNear（`digNearby` 用"够得着某个方块"） |
+| `craft-and-count.mjs` | `craftAndCount(bot, ctx, name, count, table)`：按物品名合成；配方运行 ceil(count / 每次产出) 次，物品数量至少增加"次数 × 每次产出"才算成功，否则抛错 "crafting <物品>: wanted N, got M …"（依据：试玩里一次要 8 根木棍只到了 4 根）。要工作台的配方没给 `table` 时，用够得着的工作台，没有就用 `placeNear` 放一个 |
+| `reflexes.mjs` 里的 `surfaceForAir` | 第四个反射：头在水里、空气 ≤ 10 时 `check` 触发；按住跳往上游，头顶是实心方块就挖开，2 秒不再上升就走向 5 格内的水面；20 秒出不来就抛错。`headInWater` 判断眼睛所在格有没有水 |
+| `preempt-when-drowning.mjs` | 观察器 `preemptWhenDrowning`：受到 `drown` 伤害、或每 0.5 秒检查 `surfaceForAir.check` 触发时，请求 `surfaceForAir` 抢占（任务或 idle），之后结束作业 |
+| `dig-nearby.mjs` | `digNearby(bot, ctx, names, count, { radius, dig, keep })`：不用 collectblock 采集附近的方块：最近的先挖，走到够得着处（默认只走路，`dig` 时用能挖的设置，但不挖工作台、熔炉、箱子、床和 `keep`），用 mineflayer-tool 换工具，挖，捡掉落物；每次寻路搜索 3 秒、范围半径 + 8，每个方块 30 秒，失败就跳过并在输出里写原因，跳过 5 个就停；缺工具或工具坏了就抛错；挖开后水进来就请求 `surfaceForAir` 抢占 |
+| `place-near.mjs` | `placeNear(bot, ctx, item)`：把背包里的方块放在身边够得着、身体不占、下面是完整方块的空格里，从不点会开窗口的方块；没有空格（1 格宽的坑）就先挖开脚边一格墙；在 `notes/places.md` 追加一行。`notePlace(text)` 写那一行，`fillerBlock(bot)` 选一个可以随便用掉的方块（圆石、泥土……） |
+| `smelt-items.mjs` | `smeltItems(bot, ctx, input, count, fuel)`：用够得着的熔炉，没有就 `placeNear` 放一个；先取出输出格的东西、退回不同种的输入、同种的输入算进数量，只放背包里有的数量，燃料格空时放够燃料；之后每 10 秒开一次熔炉取输出再关上，输入用完就结束 |
+| `equip-armour.mjs` | `equipArmour(bot, ctx)`：四个部位各穿上背包里最好的护甲（按材料），比身上的好才换 |
+| `climb-to-surface.mjs` | `climbToSurface(bot, ctx)`：从地下挖台阶到露天处，每一步：安全点、选方向（先选面朝的方向）、挖头顶和下一级台阶的两格、台阶下没地面就放一块、走上去；挖之前查液体和头顶的沙子沙砾，台阶上方落下的沙砾再挖掉，往上都不安全就横走一格。每一步都重新读世界，所以可以从入口重跑 |
+| `seal-in.mjs` | `sealIn(bot, ctx)`：先等站稳，用背包里的方块把脚和头两格四周、头顶、脚下的空格都填上，再从脚下做最多 32 格的洪水填充确认封闭；返回怎么出去，并在 `notes/places.md` 记下。作为作业时封好后 `ctx.wake` 告诉模型，然后等到天亮 |
+
+查询 `game/queries/find-blocks.mjs`（最近的 N 个指定方块，带坐标和距离，一行一个）和报告函数 `game/observers/upkeep.mjs`（工具坏了、手里的工具快坏、饿了又没吃的、idle 和反射吃过打过逃过什么）不在试验区，见各自文件开头。
+
+每个新文件都有默认导出，可以直接当作业运行，例如 `node game.mjs run <toolkit>/game/experimental/dig-nearby.mjs iron_ore 5 16 dig`；参数写在文件开头。
+
+## 架构特性对照
+
+这些例程是给游玩模型先读再自己写的代码，所以合起来要用到架构的每个设计特性，每个都用在它真正需要的地方。下表是对照；代码里每个特性用到的那一行有一句注释。
+
+| 特性 | 哪个例程用到，为什么在这里 | 位置 |
+| --- | --- | --- |
+| 1 任务约定（`ctx.args`、`ctx.log`、返回值、带下一步的错误） | 每个文件的默认导出读 `ctx.args`；`digNearby` 每挖一块、每跳过一块写一行 `ctx.log`，返回 `{ dug, wanted, got, skipped }`，失败时说下一步（"Craft one, then run again"、"Try again with digging movements (dig)"） | `dig-nearby.mjs`：`digNearby`、默认导出 |
+| 2 退出规则（自己的 await 之后查信号；工具函数自己会抛） | 各例程在自己的 `await bot.dig`/`equip`/`placeBlock` 之后 `ctx.signal.throwIfAborted()`；调用 `walkTo` 的地方不查（它自己抛）；超过 5 秒的等待用带 `signal` 的 `setTimeout`，否则取消会卡住（实机看到过） | `dig-nearby.mjs`：`digOne`；`smelt-items.mjs`：等待循环；`seal-in.mjs`：默认导出 |
+| 3 `ctx.cleanup(fn)` | `smeltItems` 打开的熔炉窗口在任何退出时关掉；`digNearby` 改过的寻路设置在取消的那一刻就恢复（`bot.dig` 还没返回时） | `smelt-items.mjs`：`smeltItems`；`dig-nearby.mjs`：`digNearby` |
+| 4 本例程用自己的寻路设置，之后回到只走路 | `digNearby` 按 `dig` 选走路或挖掘设置（挖掘时 `blocksCantBreak` 放进工作台等），`finally` 里 `defaultMovements` | `dig-nearby.mjs`：`digNearby` |
+| 5 有界搜索 | `digNearby`：`thinkTimeout` 3 秒、`searchRadius` 半径 + 8、每个方块 30 秒的 `AbortSignal.timeout`（到时停寻路、停挖），失败跳过；Limits 写了原因（collectblock 撑爆内存） | `dig-nearby.mjs`：`digNearby`、`digOne` |
+| 6 安全点 `then: 'restart'`，从入口重跑接着做 | `climbToSurface` 每一步 `ctx.safepoint({ surfaceForAir: 'restart', eatWhenHungry: 'restart' })`，每步只读当前位置和周围，所以重跑就是接着爬；实机取消后重跑验证过 | `climb-to-surface.mjs`：`climbToSurface` |
+| 7 任务内请求抢占 `ctx.preempt` | `digNearby` 挖开后水漫到头部时自己请求 `surfaceForAir`：反射的 `check` 要等空气降到 10，而任务此刻就知道水进来了（2026-11-10 唯一的死亡就是挖矿时溺水）。`then: 'end'`，因为重跑会再挖 `count` 个。多数例程用不到它：危险通常由观察器或安全点发现 | `dig-nearby.mjs`：`digNearby` |
+| 8 `ctx.wake(reason)` | `sealIn` 作为作业封好后叫醒模型（"sealed in …; night ends in about N min"），作业继续等到天亮 | `seal-in.mjs`：默认导出 |
+| 9 反射 `{ check, run }` | `surfaceForAir`：`check` 用在 `climbToSurface` 的安全点，也被观察器每 0.5 秒调用；`run` 由抢占启动 | `reflexes.mjs`：`surfaceForAir` |
+| 10 观察器从事件请求抢占 | `preemptWhenDrowning`：`drown` 伤害事件和定时检查 → `host.preempt('surfaceForAir')` | `preempt-when-drowning.mjs` |
+| 11 报告函数，自己记"上次报告以来" | `upkeepReport` 记下坏掉的工具、吃过打过逃过的次数，每次被调用后清空 | `game/observers/upkeep.mjs`；模板 `main.mjs` 注册 |
+| 12 只读查询模块 | `find-blocks.mjs`：读 `ctx.args`，返回几行短文本 | `game/queries/find-blocks.mjs` |
+| 13 idle | `stayAlive`：开头注释说明 idle 的形状（像任务一样的函数、循环到信号、直接调用反射的 `run`、返回或抛错之后怎样） | `stay-alive.mjs` |
+| 14 给模型留记录 | `placeNear` 和 `sealIn` 把放下的工作台、熔炉、避难处和出去的方法追加到 `notes/places.md` | `place-near.mjs`：`notePlace` |
+
+### 每个例程取自哪个版本
+
+对比了三个玩家（Ash、Birch、Cedar，2026-11-10）各自写的版本，留下在试玩里管用的做法：
+
+- `digNearby`：Cedar 的 `mine.mjs`（不用 collectBlock，走近再 `bot.dig`，捡掉落物；他靠它拿到 14 个粗铁）和 Birch 的 `mine.mjs`（限制 `thinkTimeout`、`searchRadius`，用 `ctx.cleanup` 恢复，跳过失败的方块）；Ash 和 Birch 的 collectBlock 版本加 40 秒超时仍然卡住或撑爆内存，没有用。
+- `placeNear`：Ash 的 `getTable`/`placeFrom`（候选格按距离排序，没有空格就挖开一格墙，在 1 格宽隧道里失败后改出来的）；加上 Birch 和 Cedar 被服务器拒绝的两种情况（身体占着目标格、站在水里只找了空气格）和 Ash 点到熔炉的教训。
+- `smeltItems`：Ash 的 `smelt.mjs`（容忍熔炉里已有的东西，只放背包有的数量——他因为 `putInput` 要多了失败两次）；三个版本都用 `ctx.cleanup` 关窗口。
+- `equipArmour`：三个版本相同（按名字后缀装到四个部位）；加了"比身上的好才换"。
+- `climbToSurface`：Ash 的 `surface.mjs` 用能挖能搭的寻路到地表；改成不靠寻路的一级级台阶，因为 Birch 用能搭的寻路时悄悄用掉了 47 块圆石，Cedar 和 Birch 的挖掘寻路在坑里报 noPath。
+- `sealIn`：Cedar 的 `bunker.mjs`（填脚和头两层的四周、头顶、脚下，两遍，最后列出仍然开着的格）；"仍然开着"改成有限的洪水填充。Ash 的挖坑封顶版本第一次封口失败。
+- `craftAndCount`：三个 `craft.mjs` 都有"附近找工作台，没有就放一个"，收进来时改用 `placeNear`。
+- `find-blocks.mjs`：三个 `find.mjs` 几乎相同；名字列表加 `*` 通配（Birch 和 Cedar 用正则）。
 
 只记录、不抢占的危险观察器（TNT、膨胀的苦力怕、飞行物、被盯上）是 [../observers/danger-alerts.mjs](../observers/danger-alerts.mjs)，模板没有接入。
 
@@ -246,3 +292,46 @@ hostile mobs within 24 blocks: none
 ```
 
 这些场景里模型能看到的每一行（`run`、`wait`、`cancel`、`status`、`stop` 的输出，`main.log`，`report.mjs`）都是英文。读下来不顺的三处已改：`status` 把 idle 打成 "idle idle"；死亡结束带两层括号；合成失败消息里重复的 "Error: "。没有跑的：场景 3–5、7、9、11、13–15、20、22、23（这次只覆盖上面列出的场景）。
+
+## 实机记录（2026-11-12）
+
+本地 1.21.1 官方服务器，普通难度，模板 `main.mjs`，测试项目 `play/routines`（`game/template/` 的新副本），MF_USERNAME=Rout。自然地形（种子 20261104）；物品用 RCON `give`。内存是 main 进程的 RSS（`ps -o rss`，每秒一次）。场景和布置见 [../dev/SCENARIOS.md](../dev/SCENARIOS.md) 第六节。每项跑一次，除非另注。
+
+| 场景 | 结果 |
+| --- | --- |
+| `digNearby` 一棵橡树的树干，只走路，空手（`dig-nearby.mjs '*_log' 6 16`，-505 103 830 附近） | 完成，38.7 秒，6 个原木全部挖到（脚下 1 格到上方 6 格；挖掉下面几格后站进树干的位置够到上面的），结果 `{"dug":6,"wanted":6,"got":{"oak_log":6},"skipped":[]}`；RSS 200 → 201 MB |
+| `digNearby` 地下 5–6 格的铁矿，没有镐（`dig-nearby.mjs iron_ore 3 16 dig`，-242 63 559） | 0.1 秒失败："iron_ore at -243 58 549 needs one of stone_pickaxe, iron_pickaxe, diamond_pickaxe, netherite_pickaxe; the inventory has none. Craft one, then run again" |
+| 同上，给石镐，只走路 | 54.4 秒失败：5 个矿各 10 秒没有前进（寻路最后状态 noPath）后跳过，每个在 `run` 输出里一行 "skip iron_ore at … : no progress for 10 s …"；错误以 "Try again with digging movements (dig) or walk closer" 结尾 |
+| 同上，挖掘设置（`… iron_ore 4 16 dig`） | 完成，71.9 秒，挖到 4 个，`got` 为 raw_iron 4、cobblestone 13、dirt 3（路上挖的）；RSS 205 → 205 MB；之后 `plugins.mjs` 查询 `canDig` false、`allow1by1towers` false（只走路的设置已恢复） |
+| 够不到的目标：`fill` 一个 3×3×3 基岩盒，中间绿宝石矿（-230 49 548，约 13 格外），挖掘设置，铁镐 | 4.6 秒失败："skip emerald_ore at -230 49 548: no path to -230 49 548 with the current movements"，然后 "dug none of 1: …"；RSS 207 MB 不变。先只有石镐时 0.2 秒失败，错误列出能挖它的镐 |
+| 自己的工作台和熔炉挡在路上：-236 54 545 到 -231 61 553 填满石头，-236 57 549 工作台、-236 58 549 熔炉（朝角色的一面），后面 -233 57 549 钻石矿；角色在西边 2 格的空洞里，挖掘设置 | `dig-nearby.mjs crafting_table 1` 立即失败："digNearby does not dig crafting_table (built or kept blocks)…"。`dig-nearby.mjs diamond_ore 1 8 dig` 12 秒完成，绕开工作台和熔炉从旁边挖过去（`got` cobblestone 8、diamond 1）；RCON `execute if block` 确认工作台、熔炉还在，矿的位置是空气。第一次用铁矿做目标时挖到了附近一个天然铁矿（离得更近），不算，换成钻石矿重跑 |
+| `digNearby` 10 个原木，三棵树，只走路，铁斧（`'*_log' 10 24`，-507 103 830） | 完成，51.7 秒，10/10，最高的在脚下 8 格之上（站进挖空的树干）；RSS 209 → 209 MB |
+| 远处够不到的目标：40 格外半空中的西瓜（-560 118 835，比地面高约 9 格），挖掘设置，半径 48 | 19.4 秒失败：角色走了约 40 格到它下面，10 秒没有前进（寻路最后状态 timeout）后跳过，"dug none of 1: …"；RSS 最高 219 MB（开始 209） |
+| `surfaceForAir` + `preemptWhenDrowning`：作业 `stay.mjs 60` 中 tp 到自然地面里 3×3、7 格深的水井底（-569 102 836），3 次 | 3/3 没死。第 1、3 次：空气 10 时 "[preempt] surfaceForAir preempts (air 10/20, head under water), then the job ends and idle takes over"，约 2 秒后 "surfaceForAir ended: head above water at (-569, 107, 836)"，没掉血，作业以 "ended after surfaceForAir preempted it" 结束，idle 接手。第 2 次井口盖一层石头、有石镐：游到顶后在水里挖开石头，用了 14 秒，受 `drown`×8，最低 6.2 血（在水里又不着地，挖掘慢很多） |
+| 出不去时：井口盖基岩、背包清空 | `surfaceForAir` 20 秒后失败 "head still under water after 20 s …, air 0/20"，观察器随即再请求一次，角色溺死（死亡计数 1，`drown`×18）。重生后状态段 "air 20/20"，查询 `oxygenOf` 20，而 Mineflayer 自己的 `bot.oxygenLevel` 是 -1（修复前 `oxygenOf` 在这种情况下读到 -1）。看到一个问题：致命的那下 `drown` 在重生后才送到，观察器在地面上又启动了一次 `surfaceForAir`（"ended: head above water"，无害）；已改成头在水里才请求，未重跑 |
+| `digNearby` 挖开眼睛高度的矿，矿后面是水源（石头里 2 格高的小洞，-577 106 835 钻石矿，-576 106 835 水） | 挖掉矿后水流进来，任务自己请求抢占："[preempt] surfaceForAir preempts (water came in after digging at -577 106 835), then the job ends and idle takes over"，9 秒后 "surfaceForAir ended: head above water …, air 20/20"，作业以 "ended after surfaceForAir preempted it" 结束 |
+| `placeNear` 平地（`place-near.mjs crafting_table`，恶地 -540 106 830） | 放在脚边相邻一格（-541 106 830）；`notes/places.md` 新建，追加 "- 2026-11-12 03:30 UTC: crafting_table at -541 106 830 (fact, placed by a routine)" |
+| `placeNear` 1 格宽的坑底，2 次（RCON 挖出 3 格深和 5 格深的竖井，tp 到井底） | 2/2 完成：四周没有空格，"no free cell; digging terracotta at … to make room"，挖开脚边一格墙，放进熔炉（1.7 秒）和工作台（0.6 秒）；查询确认方块在；井口仍是空气（没有堵住出路） |
+| `smeltItems` 平常的熔炉，2 个粗铁 | 完成，20.2 秒，`took` iron_ingot 2；RCON 看到煤放进燃料格、在烧 |
+| `smeltItems` 运行中 `cancel`（第一版：两次检查之间等 10 秒） | **卡住**：`cancel` 5 秒后 "task j6-smelt-items will not exit; main needs a restart"，10 秒的等待结束后才退出。等待改成随信号结束（`node:timers/promises` 的 `setTimeout` 带 `signal`） |
+| 用 RCON `setblock … furnace{Items:[…]}` 预先放好粗铁和铁锭的熔炉 | 不算：这样放进的输入 `CookTimeTotal` 是 0，原版服务器不会烧它（煤烧完，粗铁不动）。改为用游戏里的操作把东西留在熔炉里（下一行） |
+| `smeltItems` 熔炉里留着同种输入：先 `smelt-items.mjs raw_iron 4`，13 秒时 `cancel`，再跑同样的命令 | `cancel` 47 毫秒内回复 "j9-smelt-items cancelled"（等待已能随信号结束）；RCON 看到熔炉里剩 3 个粗铁和 1 个煤。第二次 "smelting 4 raw_iron … (3 were already in)"，只放进 1 个，40.2 秒完成，`took` iron_ingot 4；熔炉清空 |
+| `smeltItems` 熔炉里有别的东西：先放沙子烧，取消；之后要烧粗铁，2 次 | 输出格有玻璃：先取出 2 个玻璃，再烧 6 个粗铁，60.1 秒完成，`took` glass 2、iron_ingot 6。输入格有 3 个沙子：取回背包（RCON 数到沙子 3），烧 2 个粗铁，20.2 秒完成；熔炉只剩没烧完的 1 个煤 |
+| `smeltItems` 身边没有熔炉（背包有熔炉、木板、1 个粗铁） | 先 `placeNear` 放熔炉（"placed furnace at -521 108 840"，`notes/places.md` 多一行），燃料自动选木板放 1 块，10.8 秒完成 |
+| 合成后穿护甲：背包 24 铁锭、4 木板，附近没有工作台；`craft-and-count.mjs crafting_table:1 iron_helmet:1 iron_chestplate:1 iron_leggings:1 iron_boots:1`，再 `equip-armour.mjs` | 合成全部完成；第二项需要工作台时 `craftAndCount` 用 `placeNear` 放下刚合成的工作台（"placed crafting_table at -516 96 845"）。`equipArmour` 穿上四件，结果 `{"head":"iron_helmet","torso":"iron_chestplate","legs":"iron_leggings","feet":"iron_boots"}`；`wait` 状态段 "armor iron_helmet, iron_chestplate, iron_leggings, iron_boots"，RCON `execute if items entity Rout armor.head iron_helmet` 通过 |
+| `equipArmour` 已穿较差的护甲：穿着皮靴和金胸甲，背包有钻石靴和皮胸甲 | 只换靴子（"wearing diamond_boots"），金胸甲不换成皮的；RCON 确认脚上钻石靴、身上金胸甲 |
+| `climbToSurface` 沙漠地下 20 格（-374 53 338，RCON 挖出 1×2 的空间；上面 7 格起有一层 RCON 放的 7×7 沙砾），石镐、石锹、16 圆石 | 完成，65.9 秒，27 步，升高 20 格（`{"at":[-374,73,365],"steps":27,"climbed":20}`）。阶梯朝南走，没有经过那层沙砾；到 y=73 后头顶还有沙丘的沙子，没有往上挖，而是横着走了 7 格到露天处 |
+| `climbToSurface` 中途取消再重跑：-362 51 337（地下约 22 格），上面 y 59–60 有一层 15×15 沙砾；14 秒时 `cancel`，再 `run` 同一个任务 | 取消时角色到了 y 55；重跑从 y 55 接着走（"climbing from" 是当时的位置，不重复已挖的台阶）：头顶第 3 格是沙砾，于是横着走 5 格到沙砾层外再向上，73.9 秒、32 步到露天处（`{"at":[-358,73,369],"steps":32,"climbed":18}`）；两次合计升高 22 格。没有挖到沙砾 |
+| `climbToSurface` 台阶上方有沙砾：-340 60 337，面朝东，第一步的上格正上方 4 格沙砾柱（-339 63..66 337），再往东 y 62 一排沙砾 | 完成，104.6 秒，34 步，升高 34 格（山坡）。沙砾落下后又挖掉：背包多了 gravel 4、flint 1，RCON 确认沙砾柱的位置成了空气；角色头上没有落过沙砾，没有窒息伤害 |
+| `sealIn` 夜里野外：沙漠平地（`spreadplayers 400 -100`），时间 18000 不走，开自然刷怪，16 圆石，`seal-in.mjs` | "sealed in at 402 95 -105 (2 cells, 10 blocks placed); to leave: dig 403 95 -105 and 403 96 -105"（洪水填充 2 格就停，判定封闭）；随即 `wait` 返回，唤醒原因 "sealed in at 402 95 -105; night ends in about 5 min; the job waits for dawn (cancel to leave earlier)"，作业仍在运行。之后 3 分钟每 10 秒读血量都是 15（封闭前的值），死亡计数不变，结束时 16 格内 10 只亡灵生物；`cancel` 44 毫秒回复 "j1-seal-in cancelled (195.6 s …)"，报告没有受伤段 |
+| `sealIn` 第一次地下（RCON 在 -300 50 300 挖的小洞下面是洞穴） | 失败：角色掉进下面的洞穴，`sealIn` 在下落途中就开始，"Server refused to place block at (-299, 48, 300): the block is still air"。改为先等角色站稳（最多 4 秒，站不稳就报错），重跑见下一行 |
+| `sealIn` 地下洞穴里，天快亮（时间 22400、日夜循环开，8 块泥土），改动之后 | 完成，30.2 秒：放 2 块泥土，洪水填充 2 格判定封闭；唤醒 "sealed in at -300 46 300; night ends in about 1 min; the job waits for dawn …"，天亮（23000）后作业自己结束，结果带 `"waited":"until dawn"`；`notes/places.md` 追加 "shelter (sealed in, 2 cells) at -300 46 300; to leave: dig -299 46 300 and -299 47 300" |
+| 报告 `upkeep`：快坏的镐（`give Rout stone_pickaxe[damage=125]`，耐久 131） | 挖 1 块石头后 `wait` 的报告有一段 "== upkeep ==\nheld stone_pickaxe has 5 of 131 uses left"。再 `dig-nearby.mjs stone 8 5`：挖到第 5 块时 `run` 打印 "the stone_pickaxe broke"，下一块作业失败 "stone at -301 45 301 needs one of wooden_pickaxe, stone_pickaxe, … the inventory has none (the stone_pickaxe broke). Craft one, then run again"；`wait` 报告 "broke: stone_pickaxe; craft another before going on" |
+| 报告 `upkeep`：饿着且没有食物（hunger 效果，背包无食物） | "food 0/20 and nothing to eat in the inventory; health stops coming back below 18" |
+| 报告 `upkeep`：idle 吃东西（之后给 8 个面包） | 15 秒内 idle 吃了 4 个面包（饥饿 0 → 20），下一份报告 "since the last report: ate bread ×4" |
+| 报告 `upkeep`：idle 打和逃（竞技场，`MF_USERNAME=Rout fight.mjs zombie2 idle 1 wooden_sword 10`） | 150 秒没死，两只僵尸还活着（同 2026-11-10 的结果：饥饿降到 9 后不回血，一直躲）；报告 "food 9/20 and nothing to eat in the inventory; …" 和 "since the last report: fought zombie ×5, fled 14 times" |
+| 唤醒原因计数：没人 wait 时 RCON 私聊 3 次同样的话、1 次别的话 | `wait` 的唤醒原因两行："[03:59:15] Rcon whispers: are you there (×3)"、"[03:59:15] Rcon whispers: something else"（以前同样的原因只留第一次，不说次数） |
+| main 崩溃后重启：`patrol.mjs` 作业中 `kill -9` main，再启动 | `run` 打印 "main disconnected before the job ended (it exited or was restarted)"；新 main 启动后第一次 `wait` 立即返回："main restarted after a crash (its last record at 03:59:22 UTC); the job j3-patrol was lost; …"（这一次的措辞是改顺之前的 "after a crash at 03:59:22 (its last record) UTC"） |
+| main 非零退出后重启：`stay.mjs` 作业中 RCON `kick Rout` | main 打印 "disconnected: socketClosed" 后以退出码 1 结束；重启后第一次 `wait`："main restarted after it exited with code 1 at 03:59:47 UTC; the job j1-stay was lost; the old main's output may say why"。之后 `stop` 再启动：`status` 没有待取的报告（正常停止不提示） |
+| `fightOrFlee` 的结束措辞（上面 `fight.mjs` 那次） | idle 里被打到 10.5 血时抢占 idle，之后唤醒原因 "fightOrFlee ended: no hostile mob within 12 blocks"（原来是 "nothing hostile nearby"） |
+| `node report.mjs review`（这一局 45 分钟，main 启动 10 次） | 与上面逐项对得上：崩溃 1 次（`kill -9`，"no stop recorded after 03:59:22"）、非零退出 1 次（03:59:47，`kick`）；死亡 2 次，与 RCON 的 deathCount 计分 2 相同：03:26:38 `drown`（基岩盖住的水井）、03:38:56 `fall`（布置时 tp 到 y=90 摔死）；反射一节列出 8 次 `surfaceForAir`（其中 "from task" 1 次是 `digNearby` 的抢占）、2 次 `digHeadFree`、1 次 `fightOrFlee`（"ended: no hostile mob within 12 blocks"）；卡住 1 次（j6-smelt-items，即上面修掉的 10 秒等待）。回顾的死亡行写 "controller idle idle"（时间线里控制者记成 "idle idle"），没有改 |

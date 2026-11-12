@@ -160,3 +160,46 @@
 - 预期：main 启动次数等于服务器日志里 joined 的次数，`kill -9` 那次算一次崩溃，`stop` 那次有 `main_stop`（退出码 0）；死亡次数和时间与日志的 "was killed" 和 `jDeaths` 相同，每次死亡有位置、致命伤害类型、当时的作业和控制者，死前 60 秒的事件里有那两次 `damage`；作业按结束方式的计数与 `run` 的最后一行逐个对得上；`records/tasks/` 里改过的任务有两份、没改过的只有一份；`wait` 送达次数等于实际调用 `wait` 并拿到报告的次数（`fight.mjs` 自己调用一次）；受伤计数与 `fight-results.jsonl` 的血量变化和 RCON 的 `damage` 次数相同。
 - 通过：逐项核对后，在试验区记录里写下回顾原文的要点和核对结果。
 
+
+## 六、例程、溺水、报告和崩溃提示
+
+自然地形（种子 20261104），测试项目用自己的名字（2026-11-12 是 `Rout`），`scoreboard objectives add routDeaths deathCount`。用 `game/dev/tasks/stay.mjs` 把角色留在某处做一个作业。内存用 `ps -o rss= -p <main 的 pid>` 每秒记一次。`wait` 只在有待取的报告时才立即返回，先看 `status` 有没有 "a report is waiting"，否则它会一直等。
+
+### 25. `digNearby`
+- 布置：树林里（-505 103 830 一带有橡树）`run <仓库>/game/experimental/dig-nearby.mjs '*_log' 6 16`；地下矿：-242 63 559 附近的铁矿，先不给镐、再给石镐只走路、再加 `dig`；够不到的目标：RCON 用基岩围住一个矿，或在 40 格外半空放一个西瓜；保护：在矿前面放工作台和熔炉（`dig` 模式），另跑一次 `dig-nearby.mjs crafting_table 1`。
+- 预期：原木全部挖到（站进挖空的树干够到上面）；缺镐时立即失败并说出需要哪些镐；只走路挖不到埋着的矿时逐个跳过、错误建议 `dig`；`dig` 挖到矿；够不到的目标在 30 秒内以原因失败；工作台和熔炉还在；要求挖工作台时立即拒绝。
+- 通过：`run` 的输出、RCON `execute if block`、main 的 RSS 不持续上涨（2026-11-12：200–219 MB）；之后 `plugins.mjs` 查询 `canDig` false。
+
+### 26. 溺水
+- 布置：在自然地面里 `fill` 一个 3×3、7 格深的水井；`run tasks/stay.mjs 60`，2 秒后 tp 到井底。3 次：开口、井口盖一层石头（给镐）、再开口。另做一次井口盖基岩、背包清空（出不去），看重生后的空气值。再做一次 `digNearby` 挖开眼睛高度的矿、矿后面是水源。
+- 预期：空气 10 时 `surfaceForAir` 抢占，作业以 "ended after surfaceForAir preempted it" 结束；出不去时死亡，重生后状态段 "air 20/20"；水源那次是任务自己请求抢占（回顾里 "from task"）。
+- 通过：死亡计数、`run` 输出、`wait` 的状态段和受伤段。
+
+### 27. `placeNear`
+- 布置：平地一次；RCON 挖出 1 格宽、3 格和 5 格深的竖井，tp 到井底各一次。
+- 预期：放在身边；井底挖开脚边一格墙放进去；`notes/places.md` 多一行。
+
+### 28. `smeltItems`
+- 布置：熔炉里的东西要用游戏里的操作留下（RCON 用 NBT 放进的输入 `CookTimeTotal` 是 0，服务器不会烧）：跑一次再 `cancel`。分别留下同种输入、别的输入、输出；另做一次身边没有熔炉。
+- 预期：`cancel` 1 秒内结束；同种输入计入数量；别的输入退回背包；输出先取出；没有熔炉时先放一个。
+- 通过：结果的 `took`、RCON `data get block <熔炉> Items`、`clear <名字> <物品> 0` 的数量。
+
+### 29. `equipArmour`
+- 布置：24 铁锭、4 木板，附近没有工作台：`craft-and-count.mjs crafting_table:1 iron_helmet:1 iron_chestplate:1 iron_leggings:1 iron_boots:1`，再 `equip-armour.mjs`；另一次身上穿较差的、背包里一好一差。
+- 通过：RCON `execute if items entity <名字> armor.head iron_helmet` 等，状态段的 armor。
+
+### 30. `climbToSurface`
+- 布置：沙漠地下约 20 格挖一个 1×2 的空间，上面放一层沙砾；一次跑完；一次 14 秒时 `cancel` 再跑；一次在第一级台阶上方放沙砾柱。背包：石镐、石锹、16 圆石。
+- 预期：到露天处；重跑从当时的位置接着爬；落下的沙砾再挖掉，没有窒息。
+
+### 31. `sealIn`
+- 布置：夜里（18000，开刷怪）沙漠平地，16 圆石，`seal-in.mjs`，之后 3 分钟每 10 秒读血量，再 `cancel`；另一次在地下，时间 22400、开日夜循环。
+- 预期：判定封闭；`wait` 在作业运行中就返回唤醒原因；3 分钟不掉血；天亮时作业自己结束；`notes/places.md` 有避难处和出去的方法。
+
+### 32. 报告 `upkeep`
+- 布置：`give <名字> stone_pickaxe[damage=125]` 后挖几块石头，再挖到它坏；`effect give <名字> hunger 25 120` 且背包没有食物；之后给面包；竞技场 `fight.mjs zombie2 idle 1 wooden_sword 10`。
+- 预期：依次看到 "held stone_pickaxe has N of 131 uses left"、"broke: stone_pickaxe"、"food N/20 and nothing to eat"、"ate bread ×N"、"fought zombie ×N, fled N times"。
+
+### 33. 崩溃提示和唤醒计数
+- 布置：作业中 `kill -9` main，再启动，`wait`；作业中 RCON `kick`，再启动，`wait`；`stop` 后再启动，`status`。没人 wait 时同一句私聊 3 次。
+- 预期："main restarted after a crash (its last record at …); the job … was lost"、"main restarted after it exited with code 1 …"；正常停止后没有提示；私聊一行带 "(×3)"。

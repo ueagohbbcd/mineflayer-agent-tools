@@ -8,6 +8,7 @@
 //
 //   const journal = startJournal({ bot, dir, damage, plugins })   right after createBot
 //   createHost(bot, { ..., onEvent: journal.event })
+//   if (journal.previousEnd) host.wake(journal.previousEnd)     the last main crashed
 //
 // `node report.mjs journal [minutes]` lists the lines; `node report.mjs review`
 // sums them up (review.mjs).
@@ -21,6 +22,7 @@ import { recordLog } from './record.mjs'
 export function startJournal ({ bot, dir, damage, plugins = [] }) {
   const log = recordLog(dir, 'journal')
   const post = (type, data) => log.post(data, { type })
+  const previousEnd = lastRunEnd(path.join(recordsDir(dir), 'journal.jsonl'))
   post('main_start', { pid: process.pid, toolkit: toolkitVersion(), plugins })
   process.on('exit', code => post('main_stop', { code }))
   damage?.on(hit => post('damage', { cause: hit.type, source: hit.source, health: hit.health }))
@@ -32,7 +34,30 @@ export function startJournal ({ bot, dir, damage, plugins = [] }) {
     post(type, data)
     if (type === 'job' || type === 'job_end' || type === 'death') post('state', state(bot))
   }
-  return { event }
+  return { event, previousEnd }
+}
+
+/**
+ * How the previous main ended, as a wake reason, when it did not stop
+ * cleanly: no main_stop after its main_start (killed, out of memory, power
+ * cut) or a non-zero exit code. null after a clean stop or with no journal.
+ */
+function lastRunEnd (file) {
+  let lines
+  try { lines = fs.readFileSync(file, 'utf8').trimEnd().split('\n') } catch { return null }
+  const start = lines.findLastIndex(l => l.includes('"type":"main_start"'))
+  if (start < 0) return null
+  const run = lines.slice(start).flatMap(l => { try { return [JSON.parse(l)] } catch { return [] } })
+  const stop = run.find(e => e.type === 'main_stop')
+  if (stop?.data?.code === 0) return null
+  const open = new Set()
+  for (const e of run) {
+    if (e.type === 'job') open.add(e.data.id)
+    if (e.type === 'job_end') open.delete(e.data.id)
+  }
+  const how = stop ? `after it exited with code ${stop.data.code} at ${clock(stop.at)} UTC` : `after a crash (its last record at ${clock(run.at(-1).at)} UTC)`
+  const lost = [...open]
+  return `main restarted ${how}; ${lost.length ? `the job ${lost.join(', ')} was lost` : 'no job was running'}; the old main's output may say why`
 }
 
 function state (bot) {

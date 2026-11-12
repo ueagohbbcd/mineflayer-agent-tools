@@ -11,12 +11,13 @@ import { fileURLToPath } from 'node:url'
 import mineflayer from 'mineflayer'
 import {
   createHost, openEntry, serve, compatibleMinecraftOptions, fixCrafting, loadPlugins, stopGameActions,
-  watchDamage, watchChat, statusReport, radarReport, recordLog, startJournal, startExplore, startRadar
+  watchDamage, watchChat, statusReport, upkeepReport, radarReport, recordLog, startJournal, startExplore, startRadar
 } from 'mineflayer-world-memory/game/index.mjs'
 // Experimental: control logic still being tried out (game/experimental/README.md).
-import { fightOrFlee, digHeadFree, eatWhenHungry } from 'mineflayer-world-memory/game/experimental/reflexes.mjs'
+import { fightOrFlee, digHeadFree, eatWhenHungry, surfaceForAir } from 'mineflayer-world-memory/game/experimental/reflexes.mjs'
 import { stayAlive } from 'mineflayer-world-memory/game/experimental/stay-alive.mjs'
 import { preemptWhenHurt } from 'mineflayer-world-memory/game/experimental/preempt-when-hurt.mjs'
+import { preemptWhenDrowning } from 'mineflayer-world-memory/game/experimental/preempt-when-drowning.mjs'
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -53,22 +54,27 @@ console.log(`joined the game: ${bot.username} at ${bot.entity.position}`)
 // is no job. Every exit stops the plugins and puts the walking-only movements back.
 const host = createHost(bot, {
   dir,
-  reflexes: { fightOrFlee, digHeadFree, eatWhenHungry },
+  reflexes: { fightOrFlee, digHeadFree, eatWhenHungry, surfaceForAir },
   idle: stayAlive,
   cleanup: stopGameActions,
   onEvent: journal.event
 })
 
+// The previous main crashed or exited with an error: the first `wait` says so.
+if (journal.previousEnd) host.wake(journal.previousEnd)
+
 // Report functions: their output is joined into what `game.mjs wait` prints.
 host.addReport('status', statusReport(bot))
+host.addReport('upkeep', upkeepReport(bot)) // tools breaking, food, what idle and reflexes did
 host.addReport('nearby', radarReport(bot))
 host.addReport('damage', () => damage.report())
 const chat = watchChat(bot, { wake: host.wake })
 host.addReport('chat', () => chat.report())
 
-// Observer: being hurt badly by a mob, or suffocating, preempts the job with
-// fightOrFlee or digHeadFree.
+// Observers: being hurt badly by a mob, or suffocating, preempts the job with
+// fightOrFlee or digHeadFree; running out of air under water, with surfaceForAir.
 preemptWhenHurt(bot, host, damage)
+preemptWhenDrowning(bot, host, damage)
 
 // Records for `node report.mjs` (what was seen, who was around).
 startExplore({ bot, log: recordLog(dir, 'explore') })

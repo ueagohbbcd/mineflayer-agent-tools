@@ -7,21 +7,22 @@
 //   await walkTo(bot, ctx, [x, y, z])                        → { arrived: [x, y, z] }
 //   await walkTo(bot, ctx, [x, y, z], { range: 2, stallMs: 30000 })
 //   await walkTo(bot, ctx, [x, y, z], { checks: { eatWhenHungry: 'restart' } })   advanced: a safepoint every 0.5 s
+//   await walkTo(bot, ctx, [x, y, z], { goal })              another Pathfinder goal (digNearby: within reach of a block)
 //
 // Arrival is checked the way Pathfinder decides goal_reached (the feet cell
 // or the one above meets the goal), not by a distance of its own.
 import pathfinderPkg from 'mineflayer-pathfinder'
 const { goals } = pathfinderPkg
 
-// Does: walks to [x, y, z] within `range` with the current movements; returns
-//   { arrived }, throws after 3 noPath, `stallMs` without progress, or abort.
+// Does: walks to [x, y, z] within `range` (or until `goal` is met) with the
+//   current movements; returns { arrived }, throws after 3 noPath, `stallMs`
+//   without progress, or abort.
 // Checked: 2026-11-08: 15 blocks in 4.5 s; stall error after 20 s inside a
 //   block; cancel stops it (1 run each). 2026-11-10: 16 blocks in 3.6 s, patrols.
 // Limits: walking only by default, so it cannot leave a pit the bot dug
 //   (noPath, playtest 2026-11-10, 2/3 agents).
-export async function walkTo (bot, ctx, [x, y, z], { range = 1, checks = {}, stallMs = 20000 } = {}) {
+export async function walkTo (bot, ctx, [x, y, z], { range = 1, checks = {}, stallMs = 20000, goal = new goals.GoalNear(x, y, z, range) } = {}) {
   ctx.signal.throwIfAborted()
-  const goal = new goals.GoalNear(x, y, z, range)
   let noPath = 0
   let lastPath = 'none'
   const onPath = r => {

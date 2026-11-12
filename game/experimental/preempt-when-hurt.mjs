@@ -9,8 +9,8 @@ import { isHostile } from '../observers/radar-report.mjs'
 // Checked: 2026-11-08: fightOrFlee at 8 health, digHeadFree on in_wall (1 run
 //   each); 2026-11-10: a job preempted by fightOrFlee in 2 of 3 runs,
 //   digHeadFree in 1 run.
-// Limits: explosions and drowning do not preempt (creeper 3/3, playtest
-//   2026-11-10 drown death); the 12 threshold is not compared with others.
+// Limits: explosions do not preempt (creeper 3/3); drowning is
+//   preemptWhenDrowning's; the 12 threshold is not compared with others.
 export function preemptWhenHurt (bot, host, damage, { health = 12 } = {}) {
   damage.on(hit => {
     if (hit.type === 'in_wall') {

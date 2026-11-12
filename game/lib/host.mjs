@@ -67,7 +67,7 @@ export function createHost (bot, {
   let wakeGen = 0
   let consumedGen = 0
   let reportedEndSeq = 0
-  let reasons = []
+  let reasons = [] // { at, text, n }
   const waiters = new Set()
   let collecting = null
 
@@ -75,8 +75,10 @@ export function createHost (bot, {
     wakeGen++
     emit('wake', { reason })
     if (reason) {
-      const line = `[${new Date().toISOString().slice(11, 19)}] ${reason}`
-      if (!reasons.some(r => r.slice(11) === line.slice(11))) reasons.push(line)
+      // A repeated reason is counted on its first line instead of listed again.
+      const same = reasons.find(r => r.text === reason)
+      if (same) same.n++
+      else reasons.push({ at: new Date().toISOString().slice(11, 19), text: reason, n: 1 })
       if (reasons.length > 8) reasons = reasons.slice(-8)
     }
     if (waiters.size) serveWaiters()
@@ -92,7 +94,7 @@ export function createHost (bot, {
     const why = reasons
     reasons = []
     const lines = []
-    lines.push(why.length ? `Woke because:\n${why.map(r => `  ${r}`).join('\n')}` : 'Woke because: nothing new')
+    lines.push(why.length ? `Woke because:\n${why.map(r => `  [${r.at}] ${r.text}${r.n > 1 ? ` (×${r.n})` : ''}`).join('\n')}` : 'Woke because: nothing new')
     lines.push(`Now: ${describeNow({ alive, job, controller })}`)
     if (ends > reportedEndSeq && job?.status === 'ended') lines.push(`Last job: ${formatJob(job)}`)
     for (const [name, fn] of reports) {
@@ -403,7 +405,7 @@ export function createHost (bot, {
   bot.on('death', () => {
     alive = false
     const where = here()
-    emit('death', { where, job: job?.status === 'running' ? job.id : null, controller: controller && `${controller.kind} ${controller.name}` })
+    emit('death', { where, job: job?.status === 'running' ? job.id : null, controller: controller && (controller.kind === controller.name ? controller.kind : `${controller.kind} ${controller.name}`) })
     if (controller || job?.status === 'running') {
       requestExit({ kind: 'death', why: 'death', end: { ok: false, ended: 'death', where } })
     }

@@ -4,6 +4,7 @@
 // before any further game action once it has aborted.
 import pathfinderPkg from 'mineflayer-pathfinder'
 import { isHostile } from '../observers/radar-report.mjs'
+import { oxygenOf } from '../observation/snapshot.mjs'
 const { goals } = pathfinderPkg
 
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -40,9 +41,11 @@ const FIGHT_ABOVE = 14
 const fleeing = new WeakMap()
 
 // Does: fights back with mineflayer-pvp, flees below 8 health until above 14,
-//   keeps 7 blocks from creepers; returns after 3 s with nothing within 12, or 30 s.
+//   keeps 7 blocks from creepers; returns after 3 s with no hostile mob within
+//   12 blocks, or 30 s. Emits bot 'flee' (the mob) each time it starts running.
 // Checked: 2026-11-10, local 1.21.1, with these flee rules: two zombies 0 deaths
 //   in 9 runs (3 setups); creeper 3/3 without damage; job preempt 3 runs.
+//   2026-11-12: the 'flee' event counted by upkeepReport (1 run).
 // Limits: without regeneration (food below 18) it flees on: 150 s stand-offs,
 //   81–87 blocks away; open ground not checked; a creeper is never ended.
 export const fightOrFlee = {
@@ -54,13 +57,14 @@ export const fightOrFlee = {
     const started = Date.now()
     let calm = 0
     let target = null
+    let running = false // fleeing right now
     try {
       while (Date.now() - started < 30000) {
         signal.throwIfAborted()
         const h = nearestHostile(bot, 12)
         if (!h) {
           if (target) { bot.pvp.forceStop(); target = null }
-          if (++calm >= 6) { fleeing.delete(bot); return 'nothing hostile nearby' }
+          if (++calm >= 6) { fleeing.delete(bot); return 'no hostile mob within 12 blocks' }
           await sleep(500, signal)
           continue
         }
@@ -71,9 +75,12 @@ export const fightOrFlee = {
         const foe = nearestHostile(bot, 12, e => !isCreeper(e))?.e ?? creeper?.e // a creeper only when cornered
         const away = (fleeing.get(bot) || creeper) && fleePoint(bot)
         if (away) {
+          if (!running) bot.emit('flee', (creeper ?? h).e) // for reports (upkeepReport counts it)
+          running = true
           if (target) { bot.pvp.forceStop(); target = null }
           bot.pathfinder.setGoal(new goals.GoalNear(away.x, away.y, away.z, 1))
         } else if (foe) {
+          running = false
           if (target !== foe) {
             await equipWeapon(bot)
             signal.throwIfAborted()
@@ -215,4 +222,81 @@ export const eatWhenHungry = {
     }
     return out.length ? `ate, food ${out.join(', ')}` : 'nothing eaten'
   }
+}
+
+// Water at eye height: water itself, a bubble column, water plants (always
+// waterlogged) or any block with waterlogged=true.
+const WATERY = ['water', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass']
+
+// Does: true when the block at eye height holds water.
+// Checked: through surfaceForAir and preemptWhenDrowning (2026-11-12, 4 runs).
+// Limits: eye height is taken as 1.62 above the feet (standing, not swimming flat).
+export function headInWater (bot) {
+  const head = bot.entity && bot.blockAt(bot.entity.position.offset(0, 1.62, 0))
+  return Boolean(head && (WATERY.includes(head.name) || head.getProperties?.().waterlogged === true))
+}
+
+// Air is 0..20 (oxygenOf); drowning damage starts at 0, about 0.75 s per point.
+export const AIR_LOW = 10
+
+// Does: gets the head out of water: swims up (holds jump); digs a solid block
+//   right above the head; if it rises no more for 2 s, walks to the nearest
+//   water surface within 5 blocks. `check` fires with the head under water and
+//   air at AIR_LOW or less.
+// Checked: 2026-11-12, preempting a job 7 blocks under water: surfaced in
+//   about 2 s without damage (2 runs); under a stone lid it dug through but took
+//   14 s and 13.8 health (1 run); under bedrock it failed after 20 s (1 run).
+// Limits: digging while swimming is slow (no time under a lid at air 10);
+//   the walk to a nearby surface is not checked on a server; gives up after 20 s.
+export const surfaceForAir = {
+  check: bot => (headInWater(bot) && oxygenOf(bot) <= AIR_LOW ? `air ${oxygenOf(bot)}/20, head under water` : null),
+  async run (bot, { signal }) {
+    signal.throwIfAborted()
+    const started = Date.now()
+    let top = bot.entity.position.y
+    let risingAt = Date.now()
+    try {
+      while (headInWater(bot)) {
+        if (Date.now() - started > 20000) throw new Error(`head still under water after 20 s at ${bot.entity.position.floored()}, air ${oxygenOf(bot)}/20`)
+        const above = bot.blockAt(bot.entity.position.offset(0, 2.62, 0))
+        if (above?.boundingBox === 'block' && bot.canDigBlock(above)) {
+          await bot.tool?.equipForBlock(above, {}).catch(() => {})
+          signal.throwIfAborted()
+          await bot.dig(above)
+          signal.throwIfAborted()
+          continue
+        }
+        bot.setControlState('jump', true)
+        await sleep(250, signal)
+        if (bot.entity.position.y > top + 0.2) { top = bot.entity.position.y; risingAt = Date.now() }
+        if (Date.now() - risingAt > 2000) {
+          const to = waterSurfaceNear(bot)
+          if (to) bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 0))
+          risingAt = Date.now()
+        }
+      }
+      return `head above water at ${bot.entity.position.floored()}, air ${oxygenOf(bot)}/20`
+    } finally {
+      bot.setControlState('jump', false)
+      bot.pathfinder.setGoal(null)
+    }
+  }
+}
+
+// The nearest air cell within 5 blocks that has water right below it.
+function waterSurfaceNear (bot) {
+  const me = bot.entity.position.floored()
+  let best = null
+  for (let dx = -5; dx <= 5; dx++) {
+    for (let dz = -5; dz <= 5; dz++) {
+      for (let dy = 0; dy <= 6; dy++) {
+        const p = me.offset(dx, dy, dz)
+        if (bot.blockAt(p)?.name !== 'air' || bot.blockAt(p.offset(0, -1, 0))?.name !== 'water') continue
+        const d = p.distanceTo(me)
+        if (!best || d < best.d) best = { x: p.x, y: p.y - 1, z: p.z, d }
+        break
+      }
+    }
+  }
+  return best
 }

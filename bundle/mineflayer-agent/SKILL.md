@@ -50,13 +50,25 @@ export default async function task(bot, ctx) {
 ## What ends a job without you asking
 
 - **Death.** The job ends; idle starts after respawn. The report has where you died and where you respawned.
-- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `fightOrFlee` reflex; your head stuck in a block starts `digHeadFree`. The job ends with the reflex's result.
+- **A reflex preempts it.** A hostile mob hurting you below 12 health starts the `fightOrFlee` reflex; your head stuck in a block starts `digHeadFree`; running out of air under water starts `surfaceForAir`. The job ends with the reflex's result.
 
 Either way, read the report, decide, and submit again. Nothing restarts by itself.
 
 ## Between jobs
 
 Idle (`stayAlive` in main) keeps the character alive: it fights back when hit, gets its head out of blocks, stays at the water surface and eats when hungry. It does not travel or gather.
+
+## Routines you can call or copy
+
+Examples that worked in tests, in `<toolkit>/game/experimental/`; each source says what was checked and its limits. Not the only way: copy one into `tasks/` and change it. Each file also runs as a job, e.g. `node game.mjs run <toolkit>/game/experimental/dig-nearby.mjs iron_ore 5 16 dig`.
+
+- `digNearby` (`dig-nearby.mjs`): gather blocks near you, bounded and skipping what fails; use it instead of collectBlock.
+- `placeNear` (`place-near.mjs`): put a table, furnace or block down next to you, also in a 1-wide pit; notes it in `notes/places.md`.
+- `smeltItems` (`smelt-items.mjs`), `craftAndCount` (`craft-and-count.mjs`): smelt and craft, placing a furnace or table when none is in reach.
+- `equipArmour` (`equip-armour.mjs`): put on the best armour you carry; crafted armour is not worn by itself.
+- `climbToSurface` (`climb-to-surface.mjs`): dig stairs up to open sky; safe to run again after a stop.
+- `sealIn` (`seal-in.mjs`): wall yourself in for the night; says how to get out.
+- `walkTo` (`walk-to.mjs`): walk to a spot. Query `<toolkit>/game/queries/find-blocks.mjs NAME[,NAME] [count]`: the nearest blocks.
 
 ## Commands
 
@@ -82,9 +94,9 @@ In this order, as far as you need:
 
 ## Reminders
 
-- Pathfinding walks only. After digging down, a job that walks back out fails with no path: dig stairs or pillar up in the task, or allow digging in that task's movements.
-- Nothing preempts a job for drowning or a breaking tool: check air and the held tool in tasks that mine, especially near water.
-- If `wait` or `status` says main is not running, it crashed: start it again and look at its log.
+- Pathfinding walks only. After digging down, a job that walks back out fails with no path: run `climbToSurface`, or allow digging in that task's movements.
+- Nothing stops a job when a tool breaks; the report's `upkeep` part says when one did or is about to. Carry a spare pickaxe when mining.
+- If `wait` or `status` says main is not running, it crashed: start it again; the first `wait` then says which job was lost.
 - After a death or a failed job, append one line to `notes/log.md`: what you were trying and what you will change.
 
 ## main.mjs is yours
