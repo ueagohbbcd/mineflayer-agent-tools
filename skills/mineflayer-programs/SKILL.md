@@ -1,6 +1,6 @@
 ---
 name: mineflayer-programs
-description: "Writing Mineflayer control programs: module shape, loading plugins once, cancellation and cleanup, sharing one bot between programs, the watchdog, vectors, rules for working (look-act-check, never block the event loop, play fair), this package's helpers, and installing and connecting without mf. Read it before your first program."
+description: "Writing Mineflayer control programs: module shape, loading plugins once, cancellation and cleanup, sharing one bot between programs, the watchdog, vectors, rules for working (look-act-check, never block the event loop, play fair), this package's helpers, and installing and connecting without the game process. Read it before your first task."
 ---
 
 # Writing control programs
@@ -58,7 +58,7 @@ export default async function walkTo(bot, { signal, args }) {
 
 Remove every listener and timer a program adds (`bot.off`, `clearInterval`) before it returns; leftovers keep firing into the next program.
 
-Under `mf`, the second argument carries the `signal`, which aborts on `mf cancel`, when another program replaces this one, or when the character dies. A program that does not stop within a few seconds gets the character's process restarted, so stop promptly. `mf` also removes listeners on `bot` and timers when the program ends, and stops Pathfinder and PvP; listeners on other objects are still yours.
+In the game process, a task gets this `signal` in its `ctx`; the task contract is in `mineflayer-game`.
 
 ## Sharing one bot
 
@@ -68,7 +68,7 @@ Under `mf`, the second argument carries the `signal`, which aborts on `mf cancel
 
 ## Watchdog
 
-Under `mf` every controlling program already has one (its findings appear in the program's output and as urgent `program-watchdog` log entries that return a waiting `mf run` early; see `mf-basics`). Elsewhere, or to end a program on a finding (with `export const watchdog = false` under `mf`), wrap a controller with the watchdog to hear about a stuck bot, repeated failures or a blocked event loop:
+In the game process, main's watchdog worker notices a blocked event loop and `wait` says so. Inside your own task, or without the game process, wrap a controller with the watchdog library to hear about a stuck bot, repeated failures or a blocked event loop and decide in code:
 
 ```js
 import { watchdog } from "mineflayer-world-memory/watchdog.mjs";
@@ -83,7 +83,7 @@ try {
 }
 ```
 
-Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a door, fishing). See [docs/watchdog.md](../../docs/watchdog.md) for options.
+Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a door, fishing). See [docs/libraries/watchdog.md](../../docs/libraries/watchdog.md) for options.
 
 ## Vectors
 
@@ -103,13 +103,13 @@ Use `dog.pause()` and `dog.resume()` around intentional stillness (waiting at a 
 | Need                                    | Use                                                                                                                                                                                                                                                                                             |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Read one block, live first              | `readWorldBlock(bot, { x, y, z }, memory)` from `mineflayer-world-memory/reader.mjs`. Live blocks win; optional history is read only for unloaded chunks; `source: "unknown"` is not air. Pass `null` as `memory` when you keep no history.                                                     |
-| Remember chunks after they unload       | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/memory-api.md`). History may be stale: check `observedAt`.                                                                                                                                                         |
-| A picture of the terrain or a structure | `mineflayer-world-memory/live.mjs`: `observationViewBounds`, `surfaceSnapshotFromBot` + `renderTexturedSurface`, `snapshotFromBot` + `renderOblique`, `saveRender` (see `docs/live-visual.md`). Blank means not received, not air.                                                              |
+| Remember chunks after they unload       | `createWorldMemory(bot, { analysis: "lazy", worldId })` (optional; see `docs/libraries/memory-api.md`). History may be stale: check `observedAt`.                                                                                                                                                         |
+| A picture of the terrain or a structure | The `examples/screenshot.mjs` query (boxes, cutaways, views; `pick.mjs` for coordinates), or `capturePrismarineViews` from `mineflayer-world-memory/game/visual/prismarine.mjs` in your own code (see `game/visual/README.md`). Missing cells are not received, not air. |
 | The logs of one tree before chopping    | `queryTreeCandidate({ blockAt, seed })` from `mineflayer-world-memory/queries.mjs`.                                                                                                                                                                                                             |
-| Notice a stuck or looping program       | Under `mf` every controlling program has one: its findings appear in the output and urgent `program-watchdog` log entries (`watchdog.failure(error)` counts an error you caught). Elsewhere: `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs`; you decide where `report` sends findings. |
-| One full sample of your state           | `mf snapshot`                                                                                                                                                                                                                                                                                   |
+| Notice a stuck or looping program       | the game process's watchdog worker (`wait` says when main's thread is stuck); in your own code `watchdog(bot, { report })` from `mineflayer-world-memory/watchdog.mjs` (`dog.failure(error)` counts an error you caught). |
+| One full sample of your state           | `node game.mjs query <toolkit>/game/queries/snapshot.mjs` |
 
-## Setting up `mf`, or connecting without it
+## Installing, or connecting without the game process
 
 Node 22 or newer. In a working directory:
 
@@ -118,7 +118,7 @@ npm install mineflayer mineflayer-pathfinder vec3
 npm install "mineflayer-world-memory@https://codeload.github.com/ueagohbbcd/mineflayer-agent-tools/tar.gz/<commit>"
 ```
 
-Pin `<commit>` to a commit of this repository; the package name stays `mineflayer-world-memory`. Optional plugins: `mineflayer-pvp`, `mineflayer-collectblock`, `mineflayer-auto-eat`.
+Pin `<commit>` to a commit of this repository; the package name stays `mineflayer-world-memory`. Optional plugins (the game template loads all of them): `mineflayer-pvp`, `mineflayer-auto-eat`, `mineflayer-armor-manager`, `mineflayer-tool`, `mineflayer-collectblock`.
 
 ```js
 import mineflayer from "mineflayer";
@@ -134,4 +134,4 @@ bot.on("kicked", (reason) => console.log("kicked", reason));
 bot.on("error", (error) => console.log("error", error.message));
 ```
 
-`mf start` does this connection for you. Connect yourself only when you cannot use `mf`; then keep one connection per character alive in a long-running process that runs your programs one after another, and wait for `spawn` before reading the world.
+`game/template/main.mjs` does this connection for you and keeps it. Connect yourself only when you cannot use it; then keep one connection per character alive in a long-running process that runs your programs one after another, and wait for `spawn` before reading the world.

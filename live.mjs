@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Generic visual primitives contributed from the craft-arena integration.
+// ESM entry for live.js (`mineflayer-world-memory/live.mjs`).
 import live from "./live.js";
 export default live;
 export const {

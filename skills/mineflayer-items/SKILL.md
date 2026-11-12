@@ -5,11 +5,13 @@ description: "Using items and blocks with a Mineflayer bot: digging, placing, eq
 
 # Items, blocks and containers
 
-- **Dig:** `await bot.dig(block)`. Check `bot.canDigBlock(block)` and equip a suitable tool first (`bot.pathfinder.bestHarvestTool(block)` when Pathfinder is loaded). Check below before digging down.
-- **Place:** `await bot.placeBlock(referenceBlock, faceVector)` places against a face of an existing block. Make sure no entity (including you) stands in the target cell.
-- **Equip:** `await bot.equip(item, "hand")`. The main hand is shared by every program on the bot; equip the right item again each time work resumes, because an eating or fighting program may have changed it.
-- **Craft:** `bot.recipesFor(itemType, metadata, minResultCount, table)` lists recipes the current inventory can make; `await bot.craft(recipe, runs, table)` makes them. `runs` counts recipe executions, so use `Math.ceil(wanted / recipe.result.count)`. Pass `null` as `table` for 2×2 recipes; otherwise stand near a crafting table and pass its block.
-- **Furnaces, anvils, enchanting tables, villagers:** `openFurnace`, `openAnvil`, `openEnchantmentTable`, `openVillager`. A furnace's `fuel` and `progress` update over time; read them again after waiting.
+- **Dig:** `await bot.dig(block)`. Check `bot.canDigBlock(block)` and equip a suitable tool first: `await bot.tool.equipForBlock(block)` with `mineflayer-tool` (loaded by the game template), or `bot.pathfinder.bestHarvestTool(block)`. Check below before digging down.
+- **Collect blocks:** `await digNearby(bot, ctx, ["iron_ore", "deepslate_iron_ore"], 5, { dig: true })` from `game/experimental/dig-nearby.mjs`: nearest first, it walks within reach, equips the right tool, digs, picks up the drop, and skips a block it cannot reach within 30 s with the reason in the log. Walking only by default; `dig: true` lets the path dig, but never through crafting tables, furnaces, chests or your `keep` list. It fails at once when the needed pickaxe is missing or broke. `bot.dig` needs the block within about 4.5 blocks of the eyes; `bot.canDigBlock` checks that distance too. Avoid `bot.collectBlock.collect` with digging movements: in a playtest its unbounded path search crashed main four times (heap exhausted) and it dug up the player's own table and furnace.
+- **Underground cells** are `cave_air`, not `air`; `bot.blockAt` takes a `Vec3`, not `{ x, y, z }`.
+- **Place:** `await bot.placeBlock(referenceBlock, faceVector)` places against a face of an existing block. Make sure no entity (including you) stands in the target cell, and never place against a block that opens a window (a furnace, a table, a chest): the click opens it and the server refuses the block. `placeNear(bot, ctx, "crafting_table")` (`place-near.mjs`) finds such a cell next to you, digs one out of a wall in a 1-wide pit, and notes the spot in `notes/places.md`.
+- **Equip:** `await bot.equip(item, "hand")`. The main hand is shared by every program on the bot; equip the right item again each time a program resumes, because an eating or fighting program may have changed it.
+- **Craft:** `bot.recipesFor(itemType, metadata, minResultCount, table)` lists recipes the current inventory can make; `await bot.craft(recipe, runs, table)` makes them. `runs` counts recipe executions, so use `Math.ceil(wanted / recipe.result.count)`. Pass `null` as `table` for 2×2 recipes; otherwise stand near a crafting table and pass its block. On 1.21.1, crafts in a row leave items in the 2×2 grid and later crafts silently produce nothing until a reconnect; the game template's `fixCrafting(bot)` clears the grid after every `bot.craft`. Without it, close the window and shift-click grid slots 1–4 back after each craft, and check the count rose.
+- **Furnaces, anvils, enchanting tables, villagers:** `openFurnace`, `openAnvil`, `openEnchantmentTable`, `openVillager`. A furnace's `fuel` and `progress` update over time; read them again after waiting. `furnace.putInput(type, null, n)` with more than you carry moves what you have and then throws: put `Math.min(have, n)`. `smeltItems(bot, ctx, "raw_iron", 8)` (`smelt-items.mjs`) handles a furnace that already holds items, places one when none is in reach, and takes the output.
 
 ## Chests
 
@@ -22,5 +24,7 @@ If you look in one program and take in the next, check that `bot.currentWindow` 
 
 ## Examples
 
-- [build-with-autoeat.mjs](../../examples/build-with-autoeat.mjs): placing a planned list of blocks, eating between steps.
+- [craft-and-count.mjs](../../game/experimental/craft-and-count.mjs): `craftAndCount`, crafting by name; it fails with "wanted N, got M" unless the requested count arrived, and places a crafting table from the inventory when the recipe needs one and none is in reach.
+- [dig-nearby.mjs](../../game/experimental/dig-nearby.mjs), [place-near.mjs](../../game/experimental/place-near.mjs), [smelt-items.mjs](../../game/experimental/smelt-items.mjs): gathering, placing and smelting as above; each runs as a job by itself too.
+- [find-blocks.mjs](../../game/queries/find-blocks.mjs): a query for the nearest blocks of given names (`*_log` works).
 - [inspect-placement-entities.mjs](../../examples/inspect-placement-entities.mjs): checking that no entity blocks a placement (read-only).

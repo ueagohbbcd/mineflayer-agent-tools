@@ -1,5 +1,6 @@
 'use strict'
-// Synthetic-only exporter benchmark. No assets, saved world, bot or network.
+// Benchmark of the cache exporters (lib/visual.js surface and region): timing and
+// peak RSS on a synthetic cache. Run by hand; no assets, saved world, bot or network.
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os'), zlib = require('node:zlib')
 const { performance } = require('node:perf_hooks')
 const { openCache, surface, region } = require('../lib/visual')

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 // One-line watchdog for a Mineflayer control program. It only reads Mineflayer
 // state and events, and hands every finding to the caller's report callback.
+// game/lib/server.mjs uses its blocked-loop check; manual: docs/libraries/watchdog.md.
 const { Worker } = require('node:worker_threads')
 const { pathToFileURL } = require('node:url')
 

@@ -1,4 +1,6 @@
 'use strict'
+// readWorldBlock: one block, live world first, remembered unloaded chunks as
+// fallback. Re-exported by index.js and reader.mjs; examples and skills call it.
 const { Vec3 } = require('vec3')
 
 /** Live Mineflayer data wins; optional history is only for unloaded chunks.

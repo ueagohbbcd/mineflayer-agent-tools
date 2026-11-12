@@ -1,5 +1,6 @@
 'use strict'
-// Synthetic-only: no server, saved world, or user coordinates are read.
+// Benchmark of createWorldMemory's analysis: fresh and cached refresh timings and
+// native block reads on 16 synthetic chunks. Run by hand; synthetic only.
 // node benchmark/terrain.js [path/to/baseline-index.js]
 const { EventEmitter } = require('node:events')
 const { performance } = require('node:perf_hooks')
